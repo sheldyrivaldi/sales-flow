@@ -1,0 +1,72 @@
+package hermes
+
+import (
+	"context"
+	"encoding/json"
+)
+
+// SessionKey adalah kunci sesi workspace yang dikirim via header X-Hermes-Session-Key.
+type SessionKey string
+
+// ToolCall merepresentasikan satu tool call dari Hermes (flat, tidak nested).
+type ToolCall struct {
+	ID        string          `json:"id"`
+	Type      string          `json:"type"` // selalu "function"
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+// Message adalah satu pesan dalam percakapan.
+type Message struct {
+	Role      string     `json:"role"` // system | user | assistant | tool
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+}
+
+// ChatRequest adalah permintaan chat ke Hermes.
+// SessionKey dan SessionID dikirim sebagai header, bukan body JSON.
+type ChatRequest struct {
+	Messages   []Message  `json:"messages"`
+	Stream     bool       `json:"stream"`
+	SessionKey SessionKey `json:"-"`
+	SessionID  string     `json:"-"`
+}
+
+// ChatResponse adalah respons non-stream dari Hermes.
+type ChatResponse struct {
+	Content   string     `json:"content"`
+	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
+}
+
+// Chunk adalah satu potongan data dari stream SSE Hermes.
+type Chunk struct {
+	Delta    string    // potongan teks inkremental
+	ToolCall *ToolCall // delta tool-call bila ada (nil bila tidak)
+	Done     bool      // true pada akhir stream ([DONE])
+	Err      error     // != nil bila terjadi error di tengah stream
+}
+
+// Capabilities merepresentasikan kapabilitas yang dilaporkan Hermes.
+type Capabilities struct {
+	Version  string   `json:"version"`
+	Models   []string `json:"models"`
+	Features []string `json:"features"`
+}
+
+// ProviderConfig berisi konfigurasi AI provider yang dikirim ke bridge via /admin/config.
+type ProviderConfig struct {
+	Provider string  `json:"provider"`
+	Model    string  `json:"model"`
+	BaseURL  *string `json:"base_url"` // null bila memakai default provider
+	APIKey   string  `json:"api_key"`
+}
+
+// Client adalah kontrak abstrak ke Hermes — satu-satunya antarmuka yang boleh dipakai
+// layer service/AI. Semua implementasi detail HTTP tersembunyi di balik interface ini.
+type Client interface {
+	Chat(ctx context.Context, req ChatRequest) (ChatResponse, error)
+	ChatStream(ctx context.Context, req ChatRequest) (<-chan Chunk, error)
+	GenerateJSON(ctx context.Context, prompt string, schema any, sk SessionKey) (json.RawMessage, error)
+	Health(ctx context.Context) (Capabilities, error)
+	Configure(ctx context.Context, cfg ProviderConfig) error
+}

@@ -1,0 +1,50 @@
+@theme {
+  /* ── Brand ── */
+  --color-primary: #4F46E5;
+  --color-primary-hover: #4338CA;
+
+  /* ── Accent / AI ── */
+  --color-accent: #7C3AED;
+
+  /* ── Semantic ── */
+  --color-success: #10B981;
+  --color-warning: #F59E0B;
+  --color-danger: #EF4444;
+  --color-info: #0EA5E9;
+
+  /* ── Foreground ── */
+  --color-fg: #0F172A;
+  --color-fg-muted: #475569;
+  --color-fg-subtle: #94A3B8;
+
+  /* ── Surface ── */
+  --color-surface: #FFFFFF;
+  --color-surface-muted: #F8FAFC;
+  --color-surface-subtle: #F1F5F9;
+
+  /* ── Border ── */
+  --color-line: #E2E8F0;
+
+  /* ── Font family ── */
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  /* ── Typography scale ── */
+  --text-h1: 30px;
+  --text-h1--line-height: 38px;
+  --text-h2: 22px;
+  --text-h2--line-height: 28px;
+  --text-h3: 18px;
+  --text-h3--line-height: 26px;
+  --text-body: 15px;
+  --text-body--line-height: 22px;
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+
+  /* ── Border radius ── */
+  --radius-card: 12px;
+  --radius-btn: 8px;
+  --radius-pill: 9999px;
+
+  /* ── Shadow ── */
+  --shadow-subtle: 0 1px 3px rgba(15, 23, 42, 0.08);
+}

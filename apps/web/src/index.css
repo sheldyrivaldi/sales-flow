@@ -1,0 +1,13 @@
+@import "@fontsource-variable/inter";
+@import "tailwindcss";
+@import "./styles/tokens.css";
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+  }
+  body {
+    background: var(--color-surface-muted);
+    color: var(--color-fg);
+  }
+}

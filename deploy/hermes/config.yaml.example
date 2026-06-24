@@ -1,0 +1,49 @@
+# Hermes Agent Gateway — configuration example
+# Copy this file to config.yaml and fill in the required values.
+# Mount into the container at /app/config.yaml (see docker-compose.yml).
+
+# --- Server ---
+port: 8642
+
+# Base URL for the /v1 OpenAI-compatible API.
+# All business routes are under /v1 (e.g. /v1/chat/completions, /v1/responses).
+api_base_url: "http://localhost:8642"
+
+# --- Authentication ---
+# Clients must include: Authorization: Bearer ${API_SERVER_KEY}
+api_server_key: "${API_SERVER_KEY}"
+
+# --- MCP Servers ---
+# Register the SalesPilot MCP server so Hermes can call sales data tools.
+mcp_servers:
+  sales:
+    url: "http://api:8080/mcp"
+    auth:
+      type: bearer
+      token: "${SALES_MCP_TOKEN}"
+    supports_parallel_tool_calls: true
+    # List of allowed tools (whitelist). Expand as tools are implemented (EP-09).
+    tools:
+      include:
+        - list_tenders
+        - get_tender
+        - search_tenders
+        - list_events
+        - get_event
+        - list_prospects
+        - get_prospect
+        - get_pipeline_summary
+        - get_revenue_summary
+        - get_company_profile
+        - update_prospect_stage
+        - save_playbook_draft
+
+# --- Memory ---
+# holographic = Hermes built-in persistent memory (accumulates across sessions)
+memory:
+  provider: holographic
+
+# --- Session ---
+# Workspace session key — single constant per company so memory accumulates
+# across all user sessions. Set via WORKSPACE_SESSION_KEY env var in .env.
+# (Injected by the API server as X-Hermes-Session-Key header.)
