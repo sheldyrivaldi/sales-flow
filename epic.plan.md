@@ -179,7 +179,7 @@ EP-10/12/14 ─▶ EP-16 (learning) ; semua ─▶ EP-17 (telemetry) ; EP-01/03 
 - **DoD:** event tersimpan dengan min `name`+`type`; konversi membuat `prospect` dengan `source_type=event`, `source_id=event.id`.
 - **Risiko:** —
 
-### EP-07 — Prospect Management & Pipeline (Kanban) `[P0 · M1]`
+### ✅ EP-07 — Prospect Management & Pipeline (Kanban) `[P0 · M1]` — **DONE (ST-07.1–07.4 backend+frontend)**
 - **Tujuan:** kelola prospek dalam board kanban + detail.
 - **Scope in:** entity `prospect`; CRUD `/api/prospects`; `PATCH /api/prospects/:id/stage`; FE Kanban (Design §4.8: kolom `NEW→QUALIFIED→ENGAGED→PROPOSAL→WON/LOST`, header jumlah+total nilai, drag-drop optimistic+rollback, toggle Board↔Table, filter), Detail drawer (§4.9: info+sumber link, Analisa AI, Playbook, Timeline, aksi cepat).
 - **Scope out:** skor/playbook (EP-10/14).

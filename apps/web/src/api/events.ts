@@ -1,5 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch } from '../lib/api'
+import type { Prospect } from './prospects'
+
+export type { Prospect }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,20 +48,6 @@ export interface EventCreateBody {
 }
 
 export type EventUpdateBody = Partial<EventCreateBody>
-
-export interface Prospect {
-  id: string
-  name: string
-  company: string | null
-  contact_info: string | null
-  source_type: string
-  source_id: string | null
-  stage: string
-  est_value: number | null
-  owner_user_id: string | null
-  created_at: string
-  updated_at: string
-}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

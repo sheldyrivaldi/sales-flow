@@ -283,26 +283,14 @@ func (s *TenderService) RecordOutcome(ctx context.Context, id string, result dom
 		)
 	}
 
-	oe := &domain.OutcomeEvent{
-		TargetType: domain.OutcomeTargetTender,
-		TargetID:   t.ID,
-		Result:     result,
-	}
-	if notes != "" {
-		oe.Notes = &notes
-	}
-
-	if err := s.outcomes.Create(ctx, oe); err != nil {
-		return nil, fmt.Errorf("tender.RecordOutcome create event: %w", err)
+	if _, err := recordOutcome(ctx, s.outcomes, s.learn, domain.OutcomeTargetTender, t.ID, result, notes); err != nil {
+		return nil, fmt.Errorf("tender.RecordOutcome: %w", err)
 	}
 
 	t.Status = targetStatus
 	if err := s.repo.Update(ctx, t); err != nil {
 		return nil, fmt.Errorf("tender.RecordOutcome update status: %w", err)
 	}
-
-	// Non-blocking: notify learning hook (no-op until EP-16).
-	go s.learn.RecordOutcome(context.Background(), *oe)
 
 	return t, nil
 }

@@ -279,17 +279,17 @@ Setiap task FE: `npm run check` hijau + render manual sesuai Design. Setiap task
 ## EP-07 — Prospect Management & Pipeline
 
 ### ST-07.1–07.2 — Entity + CRUD
-- [ ] TK-07.1.1 — Migrasi `0006_prospects.up.sql` (`prospect` field §10; stage CHECK). **Done:** migrate ok.
-- [ ] TK-07.1.2 — Domain+repo (`ProspectStage` valid). **Done:** kompil.
-- [ ] TK-07.2.1 — DTO+service+handler CRUD + `PATCH /api/prospects/:id/stage`; WON/LOST emit outcome hook. **Done:** stage tersimpan.
+- [x] TK-07.1.1 — Migrasi `0006_prospects.up.sql` (`prospect` field §10; stage CHECK). **Done:** migrate ok. (**Catatan:** sudah applied sebagai `0007_prospects.up.sql` sejak ST-06.3; diverifikasi lengkap — tidak ada perubahan skema.)
+- [x] TK-07.1.2 — Domain+repo (`ProspectStage` valid). **Done:** kompil. (Tambah `ProspectFilter`, `List/Update/Delete` di `ProspectRepository` + `prospect_repo.go`.)
+- [x] TK-07.2.1 — DTO+service+handler CRUD + `PATCH /api/prospects/:id/stage`; WON/LOST emit outcome hook. **Done:** stage tersimpan.
 
 ### ST-07.3 — FE Kanban
-- [ ] TK-07.3.1 — Board. **File:** `src/pages/prospects/ProspectBoard.tsx`. **Do:** Design §4.8 kolom+header(jumlah+total nilai)+kartu(score ring/owner/badge sumber). **Done:** render board.
-- [ ] TK-07.3.2 — Drag-drop. **File:** Board (dnd-kit). **Do:** drag pindah stage → optimistic `PATCH` + rollback `onError`. **Done:** pindah tersimpan; gagal→rollback.
-- [ ] TK-07.3.3 — Toggle Board↔Table + filter. **File:** Board. **Do:** filter owner/sumber/min skor. **Done:** toggle & filter jalan.
+- [x] TK-07.3.1 — Board. **File:** `src/pages/prospects/ProspectBoard.tsx`. **Do:** Design §4.8 kolom+header(jumlah+total nilai)+kartu(score ring/owner/badge sumber). **Done:** render board.
+- [x] TK-07.3.2 — Drag-drop. **File:** Board (dnd-kit). **Do:** drag pindah stage → optimistic `PATCH` + rollback `onError`. **Done:** pindah tersimpan; gagal→rollback.
+- [x] TK-07.3.3 — Toggle Board↔Table + filter. **File:** Board. **Do:** filter owner/sumber/min skor. **Done:** toggle & filter jalan.
 
 ### ST-07.4 — FE Detail drawer
-- [ ] TK-07.4.1 — Drawer. **File:** `src/pages/prospects/ProspectDrawer.tsx`. **Do:** Design §4.9 sections + aksi cepat (stage, WON/LOST, "Tanya AI tentang prospek ini"→AskAIDrawer context). **Done:** render + aksi.
+- [x] TK-07.4.1 — Drawer. **File:** `src/pages/prospects/ProspectDrawer.tsx`. **Do:** Design §4.9 sections + aksi cepat (stage, WON/LOST, "Tanya AI tentang prospek ini"→AskAIDrawer context). **Done:** render + aksi.
 
 ---
 

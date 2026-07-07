@@ -9,6 +9,7 @@ import TenderList from './pages/tenders/TenderList'
 import TenderDetail from './pages/tenders/TenderDetail'
 import EventList from './pages/events/EventList'
 import EventDetail from './pages/events/EventDetail'
+import ProspectBoard from './pages/prospects/ProspectBoard'
 
 export default function AppRoutes() {
   return (
@@ -29,7 +30,7 @@ export default function AppRoutes() {
           <Route path="tenders/:id" element={<TenderDetail />} />
           <Route path="events" element={<EventList />} />
           <Route path="events/:id" element={<EventDetail />} />
-          <Route path="prospects" element={<PagePlaceholder title="Prospects" />} />
+          <Route path="prospects" element={<ProspectBoard />} />
           <Route path="playbooks" element={<PagePlaceholder title="Playbooks" />} />
           <Route path="reports" element={<PagePlaceholder title="Reports" />} />
           <Route path="chat" element={<Chat />} />

@@ -277,21 +277,21 @@ Estimasi: **S** ≈ ≤0.5 hari · **M** ≈ 0.5–1.5 hari · **L** ≈ 2–4 h
 
 ## EP-07 — Prospect Management & Pipeline
 
-### ST-07.1 — Entity prospect + migrasi + validasi `[P0 · M]`
+### ✅ ST-07.1 — Entity prospect + migrasi + validasi `[P0 · M]`
 - *As the system, I want model prospect.* **AC:** `prospect(name*,company,contact_info,source_type,source_id,stage*,est_value,owner_user_id)`; stage enum `NEW/QUALIFIED/ENGAGED/PROPOSAL/WON/LOST`.
-- **Teknis:** migrasi, domain, repo. **Dep:** ST-00.4.
+- **Teknis:** migrasi, domain, repo. **Dep:** ST-00.4. ✓ **DONE**
 
-### ST-07.2 — CRUD + stage patch `[P0 · M]`
+### ✅ ST-07.2 — CRUD + stage patch `[P0 · M]`
 - *As a user, I want kelola prospek & pindah stage.* **AC:** `GET/POST /api/prospects`, `GET/PUT/DELETE`, `PATCH /api/prospects/:id/stage`; WON/LOST emit outcome hook (EP-16).
-- **Teknis:** `prospect_handler.go`. **Dep:** ST-07.1, ST-03.3.
+- **Teknis:** `prospect_handler.go`. **Dep:** ST-07.1, ST-03.3. ✓ **DONE**
 
-### ST-07.3 — FE Kanban board `[P0 · L]`
+### ✅ ST-07.3 — FE Kanban board `[P0 · L]`
 - *As a user, I want board pipeline so that lihat & geser prospek cepat.* **AC:** Design §4.8: kolom + header (nama+jumlah+total nilai), kartu (nama+company, badge sumber, score ring, est value, owner), drag-drop optimistic + rollback saat gagal, toggle Board↔Table, filter owner/sumber/min skor.
-- **Teknis:** `src/pages/prospects/ProspectBoard.tsx` (dnd-kit), query invalidation. **Dep:** ST-02.4, ST-07.2.
+- **Teknis:** `src/pages/prospects/ProspectBoard.tsx` (dnd-kit), query invalidation. **Dep:** ST-02.4, ST-07.2. ✓ **DONE**
 
-### ST-07.4 — FE Prospect detail drawer `[P0 · M]`
+### ✅ ST-07.4 — FE Prospect detail drawer `[P0 · M]`
 - *As a user, I want detail prospek.* **AC:** Design §4.9: header (nama+company+stage+score ring+owner), section Info (sumber→link tender/event), Analisa AI, Playbook, Timeline, aksi cepat (ubah stage, WON/LOST, "Tanya AI tentang prospek ini" → context chip ke chat).
-- **Teknis:** `src/pages/prospects/ProspectDrawer.tsx`. **Dep:** ST-02.3, ST-07.2.
+- **Teknis:** `src/pages/prospects/ProspectDrawer.tsx`. **Dep:** ST-02.3, ST-07.2. ✓ **DONE**
 
 ---
 

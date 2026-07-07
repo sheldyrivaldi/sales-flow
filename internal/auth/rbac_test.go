@@ -53,6 +53,12 @@ func TestCan_AllCapabilitiesAllRoles(t *testing.T) {
 		{CapManageUsers, domain.RoleOps, false},
 		{CapManageUsers, domain.RoleManager, false},
 		{CapManageUsers, domain.RoleAdmin, true},
+
+		// ViewUsers — semua role bisa (read-only, untuk resolve nama owner)
+		{CapViewUsers, domain.RoleSales, true},
+		{CapViewUsers, domain.RoleOps, true},
+		{CapViewUsers, domain.RoleManager, true},
+		{CapViewUsers, domain.RoleAdmin, true},
 	}
 
 	for _, tt := range tests {

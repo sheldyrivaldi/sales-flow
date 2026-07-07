@@ -5,7 +5,9 @@ package pagination
 
 const (
 	DefaultSize = 20
-	MaxSize     = 100
+	// MaxSize must cover the largest "load everything in one page" view
+	// (the prospect Kanban board fetches the whole pipeline at once).
+	MaxSize = 500
 )
 
 // Normalize clamps page to >=1 and pageSize to [1, MaxSize], falling back to

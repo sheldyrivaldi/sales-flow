@@ -17,6 +17,11 @@ const (
 	CapUseAI         Capability = "UseAI"
 	CapMakeDecision  Capability = "MakeDecision"
 	CapManageUsers   Capability = "ManageUsers"
+	// CapViewUsers grants read-only access to the user directory (id/name/
+	// email/role), separate from CapManageUsers, so any role can resolve a
+	// teammate's name for display (e.g. prospect/tender owner) without also
+	// being able to create/edit accounts or reset passwords.
+	CapViewUsers Capability = "ViewUsers"
 )
 
 // capabilityRoles encodes the permission matrix from PRD §3.1.
@@ -28,6 +33,7 @@ var capabilityRoles = map[Capability][]domain.Role{
 	CapUseAI:        {domain.RoleSales, domain.RoleOps, domain.RoleManager, domain.RoleAdmin},
 	CapMakeDecision: {domain.RoleSales, domain.RoleOps, domain.RoleManager, domain.RoleAdmin},
 	CapManageUsers:  {domain.RoleAdmin},
+	CapViewUsers:    {domain.RoleSales, domain.RoleOps, domain.RoleManager, domain.RoleAdmin},
 }
 
 // Can reports whether role has the given capability.

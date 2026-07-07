@@ -8,12 +8,12 @@ import (
 type ProspectStage string
 
 const (
-	ProspectStageNew      ProspectStage = "NEW"
+	ProspectStageNew       ProspectStage = "NEW"
 	ProspectStageQualified ProspectStage = "QUALIFIED"
-	ProspectStageEngaged  ProspectStage = "ENGAGED"
-	ProspectStageProposal ProspectStage = "PROPOSAL"
-	ProspectStageWon      ProspectStage = "WON"
-	ProspectStageLost     ProspectStage = "LOST"
+	ProspectStageEngaged   ProspectStage = "ENGAGED"
+	ProspectStageProposal  ProspectStage = "PROPOSAL"
+	ProspectStageWon       ProspectStage = "WON"
+	ProspectStageLost      ProspectStage = "LOST"
 )
 
 func (s ProspectStage) Valid() bool {
@@ -57,8 +57,19 @@ type Prospect struct {
 
 func (Prospect) TableName() string { return "prospect" }
 
+// ProspectFilter narrows a List query. Zero-value fields are ignored.
+type ProspectFilter struct {
+	Stage       *ProspectStage
+	OwnerUserID *string
+	SourceType  *ProspectSource
+	Search      string
+}
+
 type ProspectRepository interface {
 	Create(ctx context.Context, p *Prospect) error
 	GetByID(ctx context.Context, id string) (*Prospect, error)
 	GetBySource(ctx context.Context, srcType ProspectSource, srcID string) (*Prospect, error)
+	List(ctx context.Context, f ProspectFilter, page, pageSize int) ([]Prospect, int64, error)
+	Update(ctx context.Context, p *Prospect) error
+	Delete(ctx context.Context, id string) error
 }

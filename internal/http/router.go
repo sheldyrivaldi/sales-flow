@@ -53,6 +53,9 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) *echo.Echo {
 	eventSvc := service.NewEventService(eventRepo, prospectRepo)
 	eventH := handlers.NewEventHandler(eventSvc)
 
+	prospectSvc := service.NewProspectService(prospectRepo, outcomeRepo, service.NoopLearningHook())
+	prospectH := handlers.NewProspectHandler(prospectSvc)
+
 	api := e.Group("/api")
 
 	// Public auth routes (no JWT required).
@@ -63,12 +66,15 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) *echo.Echo {
 	authd := api.Group("", auth.JWTMiddleware(cfg.JWTSecret))
 	authd.GET("/me", authH.Me)
 
-	// Admin-only user management.
-	users := authd.Group("/users", auth.RequireCapability(auth.CapManageUsers))
-	users.GET("", userH.List)
-	users.POST("", userH.Create)
-	users.PATCH("/:id", userH.Update)
-	users.POST("/:id/reset-password", userH.ResetPassword)
+	// User directory: read (CapViewUsers) is available to all roles so
+	// owner/teammate names can be resolved for display; mutations
+	// (CapManageUsers) remain Admin-only.
+	users := authd.Group("/users")
+	users.GET("", userH.List, auth.RequireCapability(auth.CapViewUsers))
+	usersAdmin := users.Group("", auth.RequireCapability(auth.CapManageUsers))
+	usersAdmin.POST("", userH.Create)
+	usersAdmin.PATCH("/:id", userH.Update)
+	usersAdmin.POST("/:id/reset-password", userH.ResetPassword)
 
 	// Tenders — semua role yang punya CapCRUDData.
 	tenders := authd.Group("/tenders", auth.RequireCapability(auth.CapCRUDData))
@@ -89,6 +95,15 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) *echo.Echo {
 	events.PUT("/:id", eventH.Update)
 	events.DELETE("/:id", eventH.Delete)
 	events.POST("/:id/convert", eventH.Convert)
+
+	// Prospects — semua role yang punya CapCRUDData.
+	prospects := authd.Group("/prospects", auth.RequireCapability(auth.CapCRUDData))
+	prospects.GET("", prospectH.List)
+	prospects.POST("", prospectH.Create)
+	prospects.GET("/:id", prospectH.Get)
+	prospects.PUT("/:id", prospectH.Update)
+	prospects.DELETE("/:id", prospectH.Delete)
+	prospects.PATCH("/:id/stage", prospectH.UpdateStage)
 
 	// Chat — semua role yang punya CapUseAI.
 	convs := authd.Group("/conversations", auth.RequireCapability(auth.CapUseAI))
