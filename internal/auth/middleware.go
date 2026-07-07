@@ -19,7 +19,7 @@ func JWTMiddleware(secret string) echo.MiddlewareFunc {
 			}
 
 			token := strings.TrimPrefix(header, "Bearer ")
-			claims, err := Parse(token, secret)
+			claims, err := Parse(token, secret, TokenAccess)
 			if err != nil {
 				return httperr.Write(c, httperr.NewUnauthorized("token tidak valid atau sudah kedaluwarsa"))
 			}

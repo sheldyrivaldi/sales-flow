@@ -23,7 +23,7 @@ func TestIssueAndParse_RoundTrip(t *testing.T) {
 		t.Fatalf("Issue error: %v", err)
 	}
 
-	claims, err := Parse(access, secret)
+	claims, err := Parse(access, secret, TokenAccess)
 	if err != nil {
 		t.Fatalf("Parse access error: %v", err)
 	}
@@ -35,7 +35,7 @@ func TestIssueAndParse_RoundTrip(t *testing.T) {
 	}
 
 	// Refresh token must also parse (role may be empty).
-	rClaims, err := Parse(refresh, secret)
+	rClaims, err := Parse(refresh, secret, TokenRefresh)
 	if err != nil {
 		t.Fatalf("Parse refresh error: %v", err)
 	}
@@ -44,9 +44,22 @@ func TestIssueAndParse_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestParse_RejectsWrongTokenType(t *testing.T) {
+	access, refresh, err := Issue(testUser(), "s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(access, "s", TokenRefresh); err == nil {
+		t.Error("expected access token to be rejected when a refresh token is wanted")
+	}
+	if _, err := Parse(refresh, "s", TokenAccess); err == nil {
+		t.Error("expected refresh token to be rejected when an access token is wanted")
+	}
+}
+
 func TestParse_WrongSecret(t *testing.T) {
 	access, _, _ := Issue(testUser(), "correct-secret")
-	if _, err := Parse(access, "wrong-secret"); err == nil {
+	if _, err := Parse(access, "wrong-secret", TokenAccess); err == nil {
 		t.Error("expected error with wrong secret, got nil")
 	}
 }
@@ -55,6 +68,7 @@ func TestParse_ExpiredToken(t *testing.T) {
 	key := []byte("secret")
 	expiredClaims := Claims{
 		Role: domain.RoleSales,
+		Type: TokenAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   "u1",
 			IssuedAt:  jwt.NewNumericDate(time.Now().Add(-2 * time.Hour)),
@@ -62,7 +76,7 @@ func TestParse_ExpiredToken(t *testing.T) {
 		},
 	}
 	token, _ := jwt.NewWithClaims(jwt.SigningMethodHS256, expiredClaims).SignedString(key)
-	if _, err := Parse(token, "secret"); err == nil {
+	if _, err := Parse(token, "secret", TokenAccess); err == nil {
 		t.Error("expected error for expired token, got nil")
 	}
 }
@@ -70,7 +84,7 @@ func TestParse_ExpiredToken(t *testing.T) {
 func TestParse_WrongSigningMethod(t *testing.T) {
 	// Build a token signed with HMAC but tamper alg header to RS256 manually is hard;
 	// instead verify that a nonsense token is rejected.
-	if _, err := Parse("not.a.jwt", "secret"); err == nil {
+	if _, err := Parse("not.a.jwt", "secret", TokenAccess); err == nil {
 		t.Error("expected error for malformed token, got nil")
 	}
 }

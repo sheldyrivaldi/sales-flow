@@ -9,7 +9,7 @@ CREATE TABLE prospect (
     stage         TEXT          NOT NULL DEFAULT 'NEW'
                                 CHECK (stage IN ('NEW','QUALIFIED','ENGAGED','PROPOSAL','WON','LOST')),
     est_value     NUMERIC(18,2) CHECK (est_value IS NULL OR est_value >= 0),
-    owner_user_id UUID,
+    owner_user_id UUID          REFERENCES "user"(id) ON DELETE SET NULL,
     created_at    TIMESTAMPTZ   NOT NULL DEFAULT now(),
     updated_at    TIMESTAMPTZ   NOT NULL DEFAULT now()
 );

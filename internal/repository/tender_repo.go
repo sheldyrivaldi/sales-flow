@@ -47,6 +47,9 @@ func (r *TenderRepo) List(ctx context.Context, f domain.TenderFilter, page, page
 	if f.Origin != nil {
 		q = q.Where("origin = ?", *f.Origin)
 	}
+	if f.BuyerName != "" {
+		q = q.Where("buyer_name ILIKE ?", "%"+f.BuyerName+"%")
+	}
 	if f.DeadlineFrom != nil {
 		q = q.Where("submission_deadline >= ?", *f.DeadlineFrom)
 	}

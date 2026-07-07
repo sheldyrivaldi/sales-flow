@@ -1,4 +1,4 @@
-import { currentAccessToken } from './api'
+import { currentAccessToken, ensureRefreshed } from './api'
 
 export interface ToolCallEvent {
   id: string
@@ -25,9 +25,8 @@ export async function streamChat(
   handlers: ChatStreamHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
-  let res: Response
-  try {
-    res = await fetch(`/api/conversations/${conversationId}/chat`, {
+  const doFetch = () =>
+    fetch(`/api/conversations/${conversationId}/chat`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -36,10 +35,31 @@ export async function streamChat(
       body: JSON.stringify({ content }),
       signal,
     })
+
+  let res: Response
+  try {
+    res = await doFetch()
   } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') return
+    if (err instanceof Error && err.name === 'AbortError') {
+      handlers.onDone()
+      return
+    }
     handlers.onError('Koneksi ke agent terputus. Coba lagi.')
     return
+  }
+
+  if (res.status === 401) {
+    try {
+      await ensureRefreshed()
+      res = await doFetch()
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') {
+        handlers.onDone()
+        return
+      }
+      handlers.onError('Sesi berakhir, silakan login ulang.')
+      return
+    }
   }
 
   if (!res.ok) {
@@ -98,7 +118,10 @@ export async function streamChat(
       }
     }
   } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') return
+    if (err instanceof Error && err.name === 'AbortError') {
+      handlers.onDone()
+      return
+    }
     handlers.onError('Stream terputus. Coba lagi.')
   }
 }

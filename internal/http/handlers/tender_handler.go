@@ -10,6 +10,7 @@ import (
 	"salespilot/internal/domain"
 	"salespilot/internal/http/dto"
 	"salespilot/internal/http/httperr"
+	"salespilot/internal/pagination"
 	"salespilot/internal/service"
 )
 
@@ -37,6 +38,7 @@ func (h *TenderHandler) List(c echo.Context) error {
 		o := domain.TenderOrigin(v)
 		f.Origin = &o
 	}
+	f.BuyerName = c.QueryParam("buyer")
 	if v := c.QueryParam("deadline_from"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			f.DeadlineFrom = &t
@@ -55,17 +57,11 @@ func (h *TenderHandler) List(c echo.Context) error {
 
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
+	page, pageSize = pagination.Normalize(page, pageSize)
 
 	tenders, total, err := h.svc.List(c.Request().Context(), f, page, pageSize)
 	if err != nil {
 		return httperr.Write(c, err)
-	}
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 20
 	}
 
 	items := make([]dto.TenderResponse, len(tenders))

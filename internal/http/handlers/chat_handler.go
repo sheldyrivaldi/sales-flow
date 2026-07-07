@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -17,6 +18,7 @@ import (
 	"salespilot/internal/hermes"
 	"salespilot/internal/http/dto"
 	"salespilot/internal/http/httperr"
+	"salespilot/internal/pagination"
 	"salespilot/internal/service"
 )
 
@@ -71,17 +73,11 @@ func (h *ChatHandler) List(c echo.Context) error {
 
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
+	page, pageSize = pagination.Normalize(page, pageSize)
 
 	convs, total, err := h.svc.ListConversations(c.Request().Context(), user.ID, page, pageSize)
 	if err != nil {
 		return httperr.Write(c, err)
-	}
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 20
 	}
 
 	items := make([]dto.ConversationResponse, len(convs))
@@ -223,11 +219,15 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 	}
 
 	// Best-effort: persist assistant message even if stream was interrupted.
+	// Uses a detached context — the request context may already be canceled
+	// (client disconnect) by the time we get here.
 	var toolCallsJSON []byte
 	if len(toolCallsAccum) > 0 {
 		toolCallsJSON, _ = json.Marshal(toolCallsAccum)
 	}
-	_ = h.svc.SaveAssistantMessage(c.Request().Context(), conv.ID, assistantContent.String(), toolCallsJSON)
+	persistCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = h.svc.SaveAssistantMessage(persistCtx, conv.ID, assistantContent.String(), toolCallsJSON)
 
 	return nil
 }

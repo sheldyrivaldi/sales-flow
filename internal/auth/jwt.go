@@ -14,8 +14,19 @@ const (
 	RefreshTTL = 7 * 24 * time.Hour
 )
 
+// TokenType distinguishes access tokens from refresh tokens so one can't be
+// replayed as the other — they share a signing key and are otherwise
+// structurally identical.
+type TokenType string
+
+const (
+	TokenAccess  TokenType = "access"
+	TokenRefresh TokenType = "refresh"
+)
+
 type Claims struct {
 	Role domain.Role `json:"role"`
+	Type TokenType   `json:"typ"`
 	jwt.RegisteredClaims
 }
 
@@ -26,6 +37,7 @@ func Issue(u domain.User, secret string) (access, refresh string, err error) {
 
 	accessClaims := Claims{
 		Role: u.Role,
+		Type: TokenAccess,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   u.ID,
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -38,6 +50,7 @@ func Issue(u domain.User, secret string) (access, refresh string, err error) {
 	}
 
 	refreshClaims := Claims{
+		Type: TokenRefresh,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Subject:   u.ID,
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -52,9 +65,11 @@ func Issue(u domain.User, secret string) (access, refresh string, err error) {
 	return access, refresh, nil
 }
 
-// Parse validates a signed JWT string and returns its Claims.
-// Rejects tokens signed with any method other than HMAC.
-func Parse(token, secret string) (*Claims, error) {
+// Parse validates a signed JWT string and returns its Claims, rejecting
+// tokens whose Type does not match want (an access token cannot be used
+// where a refresh token is expected, or vice versa). Rejects tokens signed
+// with any method other than HMAC.
+func Parse(token, secret string, want TokenType) (*Claims, error) {
 	claims := &Claims{}
 	_, err := jwt.ParseWithClaims(token, claims, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -64,6 +79,9 @@ func Parse(token, secret string) (*Claims, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("auth.Parse: %w", err)
+	}
+	if claims.Type != want {
+		return nil, fmt.Errorf("auth.Parse: unexpected token type %q, want %q", claims.Type, want)
 	}
 	return claims, nil
 }

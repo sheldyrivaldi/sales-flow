@@ -1,6 +1,6 @@
 CREATE TABLE conversation (
     id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_user_id     UUID        NOT NULL REFERENCES "user"(id),
+    owner_user_id     UUID        NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
     title             TEXT        NOT NULL DEFAULT '',
     session_key       TEXT        NOT NULL,
     hermes_session_id TEXT        NOT NULL,

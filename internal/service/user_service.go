@@ -10,6 +10,7 @@ import (
 	"salespilot/internal/auth"
 	"salespilot/internal/domain"
 	"salespilot/internal/http/httperr"
+	"salespilot/internal/pagination"
 )
 
 type UserService struct {
@@ -21,12 +22,7 @@ func NewUserService(users domain.UserRepository) *UserService {
 }
 
 func (s *UserService) List(ctx context.Context, f domain.UserFilter, page, pageSize int) ([]domain.User, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
+	page, pageSize = pagination.Normalize(page, pageSize)
 	return s.users.List(ctx, f, page, pageSize)
 }
 

@@ -10,6 +10,7 @@ import (
 	"salespilot/internal/domain"
 	"salespilot/internal/http/dto"
 	"salespilot/internal/http/httperr"
+	"salespilot/internal/pagination"
 	"salespilot/internal/service"
 )
 
@@ -37,17 +38,11 @@ func (h *EventHandler) List(c echo.Context) error {
 
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
+	page, pageSize = pagination.Normalize(page, pageSize)
 
 	events, total, err := h.svc.List(c.Request().Context(), f, page, pageSize)
 	if err != nil {
 		return httperr.Write(c, err)
-	}
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 20
 	}
 
 	items := make([]dto.EventResponse, len(events))

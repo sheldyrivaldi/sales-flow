@@ -4,7 +4,7 @@ type UserCreateRequest struct {
 	Email    string `json:"email"    validate:"required,email"`
 	Name     string `json:"name"     validate:"required"`
 	Role     string `json:"role"     validate:"required,oneof=SALES OPS MANAGER ADMIN"`
-	Password string `json:"password" validate:"required,min=8"`
+	Password string `json:"password" validate:"required,min=8,max=72"`
 }
 
 type UserUpdateRequest struct {
@@ -14,7 +14,7 @@ type UserUpdateRequest struct {
 }
 
 type ResetPasswordRequest struct {
-	Password *string `json:"password" validate:"omitempty,min=8"`
+	Password *string `json:"password" validate:"omitempty,min=8,max=72"`
 }
 
 type ResetPasswordResponse struct {

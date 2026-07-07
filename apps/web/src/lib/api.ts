@@ -59,7 +59,7 @@ export function configureApi(opts: {
 
 let refreshPromise: Promise<void> | null = null
 
-async function ensureRefreshed(): Promise<void> {
+export async function ensureRefreshed(): Promise<void> {
   if (refreshPromise) return refreshPromise
 
   refreshPromise = (async () => {
@@ -135,9 +135,16 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
   } catch (err) {
     if (err instanceof ApiError && err.status === 401 && !isAuthPath) {
       await ensureRefreshed()
-      // retry once with fresh token
-      const res = await rawFetch(path, init, true)
-      return res.json() as Promise<T>
+      try {
+        // retry once with fresh token
+        const res = await rawFetch(path, init, true)
+        return res.json() as Promise<T>
+      } catch (retryErr) {
+        if (retryErr instanceof ApiError && retryErr.status === 401) {
+          onUnauthorized()
+        }
+        throw retryErr
+      }
     }
     throw err
   }

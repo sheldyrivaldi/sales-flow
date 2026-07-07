@@ -11,6 +11,7 @@ import (
 	"salespilot/internal/domain"
 	"salespilot/internal/http/dto"
 	"salespilot/internal/http/httperr"
+	"salespilot/internal/pagination"
 )
 
 // EventService handles business logic for the event entity.
@@ -76,12 +77,7 @@ func (s *EventService) Get(ctx context.Context, id string) (*domain.Event, error
 
 // List returns paginated events matching the filter.
 func (s *EventService) List(ctx context.Context, f domain.EventFilter, page, pageSize int) ([]domain.Event, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
+	page, pageSize = pagination.Normalize(page, pageSize)
 	return s.repo.List(ctx, f, page, pageSize)
 }
 

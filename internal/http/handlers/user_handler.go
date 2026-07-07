@@ -9,6 +9,7 @@ import (
 	"salespilot/internal/domain"
 	"salespilot/internal/http/dto"
 	"salespilot/internal/http/httperr"
+	"salespilot/internal/pagination"
 	"salespilot/internal/service"
 )
 
@@ -39,6 +40,7 @@ func (h *UserHandler) List(c echo.Context) error {
 
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	pageSize, _ := strconv.Atoi(c.QueryParam("page_size"))
+	page, pageSize = pagination.Normalize(page, pageSize)
 
 	users, total, err := h.svc.List(c.Request().Context(), f, page, pageSize)
 	if err != nil {
@@ -48,13 +50,6 @@ func (h *UserHandler) List(c echo.Context) error {
 	items := make([]dto.UserResponse, len(users))
 	for i, u := range users {
 		items[i] = dto.ToUserResponse(u)
-	}
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 20
 	}
 
 	return c.JSON(http.StatusOK, dto.UserListResponse{

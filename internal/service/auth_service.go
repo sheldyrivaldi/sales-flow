@@ -50,7 +50,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*domai
 
 // Refresh validates a refresh token and issues a new token pair.
 func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (string, string, error) {
-	claims, err := auth.Parse(refreshToken, s.jwtSecret)
+	claims, err := auth.Parse(refreshToken, s.jwtSecret, auth.TokenRefresh)
 	if err != nil {
 		return "", "", httperr.NewUnauthorized("refresh token tidak valid atau sudah kedaluwarsa")
 	}

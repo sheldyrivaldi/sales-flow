@@ -11,6 +11,7 @@ import (
 	"salespilot/internal/domain"
 	"salespilot/internal/http/dto"
 	"salespilot/internal/http/httperr"
+	"salespilot/internal/pagination"
 )
 
 // tenderTransitions defines the set of valid target statuses for each current status.
@@ -126,12 +127,7 @@ func (s *TenderService) Get(ctx context.Context, id string) (*domain.Tender, err
 
 // List returns paginated tenders matching the filter.
 func (s *TenderService) List(ctx context.Context, f domain.TenderFilter, page, pageSize int) ([]domain.Tender, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
+	page, pageSize = pagination.Normalize(page, pageSize)
 	return s.repo.List(ctx, f, page, pageSize)
 }
 
@@ -276,6 +272,17 @@ func (s *TenderService) RecordOutcome(ctx context.Context, id string, result dom
 		return nil, err
 	}
 
+	targetStatus := domain.TenderStatusLost
+	if result == domain.OutcomeWon {
+		targetStatus = domain.TenderStatusWon
+	}
+	if !canTransition(t.Status, targetStatus) {
+		return nil, httperr.NewBadRequest(
+			"INVALID_TRANSITION",
+			fmt.Sprintf("tidak bisa merekam outcome %s dari status %s", result, t.Status),
+		)
+	}
+
 	oe := &domain.OutcomeEvent{
 		TargetType: domain.OutcomeTargetTender,
 		TargetID:   t.ID,
@@ -289,13 +296,7 @@ func (s *TenderService) RecordOutcome(ctx context.Context, id string, result dom
 		return nil, fmt.Errorf("tender.RecordOutcome create event: %w", err)
 	}
 
-	// Set terminal status directly (outcome bypasses normal transition rules).
-	switch result {
-	case domain.OutcomeWon:
-		t.Status = domain.TenderStatusWon
-	case domain.OutcomeLost:
-		t.Status = domain.TenderStatusLost
-	}
+	t.Status = targetStatus
 	if err := s.repo.Update(ctx, t); err != nil {
 		return nil, fmt.Errorf("tender.RecordOutcome update status: %w", err)
 	}
