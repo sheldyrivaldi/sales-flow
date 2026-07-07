@@ -23,7 +23,7 @@ func (r Role) Valid() bool {
 }
 
 type User struct {
-	ID           string    `json:"id"         gorm:"primaryKey"`
+	ID           string    `json:"id"         gorm:"primaryKey;default:gen_random_uuid()"`
 	Email        string    `json:"email"      gorm:"uniqueIndex;not null"`
 	PasswordHash string    `json:"-"          gorm:"column:password_hash;not null"`
 	Name         string    `json:"name"       gorm:"not null"`

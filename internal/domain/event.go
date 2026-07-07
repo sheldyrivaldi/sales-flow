@@ -42,7 +42,7 @@ func (s EventStatus) Valid() bool {
 }
 
 type Event struct {
-	ID        string      `json:"id"         gorm:"primaryKey"`
+	ID        string      `json:"id"         gorm:"primaryKey;default:gen_random_uuid()"`
 	Name      string      `json:"name"       gorm:"not null"`
 	Type      EventType   `json:"type"       gorm:"not null"`
 	Date      *time.Time  `json:"date"       gorm:"column:event_date"`

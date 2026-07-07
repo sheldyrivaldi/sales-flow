@@ -24,7 +24,7 @@ func (r MessageRole) Valid() bool {
 }
 
 type Conversation struct {
-	ID              string    `json:"id"                gorm:"primaryKey"`
+	ID              string    `json:"id"                gorm:"primaryKey;default:gen_random_uuid()"`
 	OwnerUserID     string    `json:"owner_user_id"     gorm:"column:owner_user_id;not null"`
 	Title           string    `json:"title"             gorm:"not null;default:''"`
 	SessionKey      string    `json:"-"                 gorm:"column:session_key;not null"`
@@ -36,7 +36,7 @@ type Conversation struct {
 func (Conversation) TableName() string { return "conversation" }
 
 type Message struct {
-	ID             string          `json:"id"              gorm:"primaryKey"`
+	ID             string          `json:"id"              gorm:"primaryKey;default:gen_random_uuid()"`
 	ConversationID string          `json:"conversation_id" gorm:"column:conversation_id;not null"`
 	Role           MessageRole     `json:"role"            gorm:"not null"`
 	Content        string          `json:"content"         gorm:"not null;default:''"`

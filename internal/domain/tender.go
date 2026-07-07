@@ -60,7 +60,7 @@ func (o TenderOrigin) Valid() bool {
 }
 
 type Tender struct {
-	ID                      string             `json:"id"                        gorm:"primaryKey"`
+	ID                      string             `json:"id"                        gorm:"primaryKey;default:gen_random_uuid()"`
 	Title                   string             `json:"title"                     gorm:"not null"`
 	BuyerName               *string            `json:"buyer_name"                gorm:"column:buyer_name"`
 	BuyerCountry            *string            `json:"buyer_country"             gorm:"column:buyer_country"`

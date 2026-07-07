@@ -36,7 +36,7 @@ func (t OutcomeTargetType) Valid() bool {
 }
 
 type OutcomeEvent struct {
-	ID         string            `json:"id"          gorm:"primaryKey"`
+	ID         string            `json:"id"          gorm:"primaryKey;default:gen_random_uuid()"`
 	TargetType OutcomeTargetType `json:"target_type" gorm:"column:target_type;not null"`
 	TargetID   string            `json:"target_id"   gorm:"column:target_id;not null"`
 	Result     OutcomeResult     `json:"result"      gorm:"not null"`

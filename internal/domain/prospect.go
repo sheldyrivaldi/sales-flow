@@ -42,7 +42,7 @@ func (s ProspectSource) Valid() bool {
 }
 
 type Prospect struct {
-	ID          string         `json:"id"            gorm:"primaryKey"`
+	ID          string         `json:"id"            gorm:"primaryKey;default:gen_random_uuid()"`
 	Name        string         `json:"name"          gorm:"not null"`
 	Company     *string        `json:"company"`
 	ContactInfo *string        `json:"contact_info"  gorm:"column:contact_info"`
