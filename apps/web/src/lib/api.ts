@@ -177,3 +177,20 @@ export async function getMe(): Promise<UserDTO> {
 export function currentAccessToken(): string | null {
   return getAccessToken()
 }
+
+// ---- Query helpers --------------------------------------------------------
+
+// buildQueryString encodes a filter object into a `?a=1&b=2` suffix, skipping
+// undefined/null/empty-string values. Shared by all api/* modules so query
+// encoding lives in one place. Booleans (incl. false) are kept.
+export function buildQueryString(
+  params: Record<string, string | number | boolean | undefined | null>,
+): string {
+  const sp = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') continue
+    sp.set(key, String(value))
+  }
+  const qs = sp.toString()
+  return qs ? `?${qs}` : ''
+}

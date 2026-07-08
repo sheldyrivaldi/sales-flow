@@ -27,3 +27,6 @@ coverage.*
 Thumbs.db
 .idea/
 .vscode/
+
+# Local secret/scratch token — must never be committed
+token.txt

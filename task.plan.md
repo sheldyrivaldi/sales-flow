@@ -296,26 +296,26 @@ Setiap task FE: `npm run check` hijau + render manual sesuai Design. Setiap task
 ## EP-08 — Knowledge / Company Profile
 
 ### ST-08.1 — Entities + versioning
-- [ ] TK-08.1.1 — Migrasi `0007_profile.up.sql`. **Do:** `company_profile`,`target_criteria`,`nogo_rule`,`source`,`keyword_set` (field §10) + `version int` + `is_current bool`. **Done:** migrate ok.
-- [ ] TK-08.1.2 — Domain+repo. **File:** `domain/profile.go`, `repository/profile_repo.go`. **Do:** simpan versi baru = clone+increment, set `is_current`. **Done:** versi bertambah.
+- [x] TK-08.1.1 — Migrasi `0008_profile.up.sql`. **Do:** `company_profile`,`target_criteria`,`nogo_rule`,`source`,`keyword_set` (field §10) + `version int` + `is_current bool`. **Done:** migrate ok. (**Koreksi:** nomor 0008 karena 0007 sudah dipakai prospects sejak ST-06.3; migrasi EP-10+ bergeser +1.)
+- [x] TK-08.1.2 — Domain+repo. **File:** `domain/profile.go`, `domain/source.go`, `repository/profile_repo.go`, `repository/source_repo.go`. **Do:** aggregate `ProfileAggregate` (profile+target+nogo+keywords); simpan versi baru = clone+increment dalam transaksi, set `is_current` (matikan versi lama dulu, partial unique index jaga max 1 current). **Done:** versi bertambah; `go build`/`vet`/`test` hijau.
 
 ### ST-08.2 — Read/write + defaults
-- [ ] TK-08.2.1 — Defaults/preset. **File:** profile service. **Do:** default value_min Rp 1e9, deadline_min_days 7, countries=[Indonesia], procurement preset. **Done:** profil baru terisi default.
-- [ ] TK-08.2.2 — Endpoints. **File:** `handlers/profile_handler.go`. **Do:** `GET /api/profile` (current), `PUT /api/profile` (versi baru) — RBAC `EditProfile`. **Done:** SALES read-only, OPS+ bisa edit.
+- [x] TK-08.2.1 — Defaults/preset. **File:** `service/profile_service.go`. **Do:** default value_min Rp 1e9, deadline_min_days 7, countries=[Indonesia], procurement preset. **Done:** profil baru terisi default; unit test `TestDefaultAggregate` hijau.
+- [x] TK-08.2.2 — Endpoints. **File:** `handlers/profile_handler.go`, `dto/profile.go`, wiring `router.go`. **Do:** `GET /api/profile` (current, 200 template default bila belum ada), `PUT /api/profile` (versi baru, merge atas versi sebelumnya) — RBAC `EditProfile`. **Done:** SALES read-only (200), OPS+/ADMIN bisa edit; diverifikasi `curl` end-to-end (v1→v2→v3→v4, 1 `is_current`, riwayat tersimpan, validasi `company_name` wajib →422, SALES PUT→403).
 
 ### ST-08.3 — Source mgmt
-- [ ] TK-08.3.1 — CRUD source. **File:** `handlers/source_handler.go`. **Do:** CRUD + validasi URL + access enum; preset Indonesia (SPSE/LKPP, eProc PLN, Pertamina, Telkom/SMILE, PaDi) 1-klik aktif; tandai Login/Manual. **Done:** preset bisa diaktifkan.
+- [x] TK-08.3.1 — CRUD source. **File:** `handlers/source_handler.go`, `dto/source.go`, `service/source_service.go`, wiring `router.go`. **Do:** CRUD + validasi URL + access enum; preset Indonesia (SPSE/Inaproc LKPP, eProc PLN, eProc Pertamina, Telkom SMILE, PaDi UMKM) 1-klik aktif via `GET/POST /api/sources/presets` (idempotent); tandai Login/Manual. **Done:** preset diaktifkan (idempotent, diverifikasi `curl`), validasi URL →422, RBAC SALES read-only →403 mutasi.
 
 ### ST-08.4 — Keyword + auto-generate
-- [ ] TK-08.4.1 — Generator. **File:** `service/keyword_service.go`. **Do:** generate keyword dari `service_categories`; `negative_keywords` preset; endpoint CRUD. **Done:** pilih kapabilitas→keyword muncul (editable).
+- [x] TK-08.4.1 — Generator. **File:** `service/keyword_service.go`, `handlers/keyword_handler.go`, `dto/keyword.go`, wiring `router.go`. **Do:** `POST /api/profile/keywords/generate` (draft, tidak persist) generate keyword via Hermes `GenerateJSON` dari `service_categories`; `negative_keywords` preset deterministik (merge+dedup); degrade graceful bila Hermes gagal (`degraded:true`, preset saja); RBAC `CapEditProfile`. **Done:** unit test sukses & degrade hijau, `go build/vet/test` hijau, `golangci-lint` bersih (tidak ada temuan baru).
 
 ### ST-08.5 — FE Onboarding lean
-- [ ] TK-08.5.1 — Onboarding. **File:** `src/pages/onboarding/Onboarding.tsx`. **Do:** Design §4.2 dua jalur (Upload PDF[placeholder→EP-13] / Isi manual) + Stepper + "Lewati atur nanti". **Done:** alur jalan.
-- [ ] TK-08.5.2 — Aktifkan Agent. **File:** Onboarding. **Do:** tombol → simpan profil → trigger discovery pertama (EP-12; no-op bila belum) → redirect Penemuan AI; skip → banner Dashboard. **Done:** redirect benar.
+- [x] TK-08.5.1 — Onboarding. **File:** `src/pages/onboarding/Onboarding.tsx`, `src/api/profile.ts`, `src/api/keywords.ts`. **Do:** Design §4.2 dua jalur (Upload PDF[placeholder→EP-13] / Isi manual) + Stepper + "Lewati atur nanti"; form manual lean (nama*/kapabilitas/nilai min) + generate keyword. **Done:** alur jalan (`tsc -b`, `eslint`, `vite build` hijau).
+- [x] TK-08.5.2 — Aktifkan Agent. **File:** Onboarding, `src/components/OtakAgentBanner.tsx`, `src/routes.tsx`. **Do:** tombol → simpan profil (`PUT /api/profile`) → trigger discovery pertama (EP-12; no-op) → redirect `/discovery`; skip → banner Dashboard (render bila `version===0`). **Done:** redirect benar (verifikasi kode: `navigate('/discovery')` setelah save sukses; banner otomatis sembunyi setelah profil tersimpan).
 
 ### ST-08.6 — FE Otak Agent (6 kartu)
-- [ ] TK-08.6.1 — Halaman + 6 kartu. **File:** `src/pages/profile/OtakAgent.tsx`. **Do:** Design §4.13 kartu 1–6 (chip preset, toggle no-go, slider bobot collapsed), Simpan sticky, badge "diperbarui {waktu}", tooltip per field. **Done:** simpan→toast + versi baru.
-- [ ] TK-08.6.2 — Sub-tab Sumber. **File:** OtakAgent. **Do:** tabel sumber (Nama/URL/Negara/Akses/Legal note/Aktif) + badge Login/Manual. **Done:** kelola sumber dari UI.
+- [x] TK-08.6.1 — Halaman + 6 kartu. **File:** `src/pages/profile/OtakAgent.tsx` + `src/components/profile/{ProfileCard,CapabilitiesCard,TargetCard,NoGoCard,SourcesKeywordCard,ScoringCard,types}.tsx`, `src/lib/profilePresets.ts`. **Do:** Design §4.13 kartu 1–6 (chip preset, toggle no-go, kartu 6 scoring collapsed placeholder EP-10, frekuensi crawl disabled EP-12), Simpan sticky, badge "diperbarui {waktu}"/"belum dikonfigurasi", tooltip per field, gating `useCan('EditProfile')`. **Done:** simpan→toast + versi baru (`PUT /api/profile`); `tsc -b`, `eslint`, `vite build` hijau.
+- [x] TK-08.6.2 — Sub-tab Sumber. **File:** OtakAgent (`SourcesTab.tsx`, `SourceFormModal.tsx`), `src/api/sources.ts`. **Do:** tabel sumber (Nama/URL/Negara/Akses/Legal note/Aktif) + badge Login/Manual; preset 1-klik idempotent; tambah/edit/hapus sumber; gating `canEdit`. **Done:** kelola sumber dari UI; `tsc -b`, `eslint`, `vite build` hijau.
 
 ---
 

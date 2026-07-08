@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiFetch } from '../lib/api'
+import { apiFetch, buildQueryString } from '../lib/api'
 import { toast } from '../lib/toast'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -83,26 +83,12 @@ export function isTerminalStage(stage: ProspectStage): stage is 'WON' | 'LOST' {
   return stage === 'WON' || stage === 'LOST'
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function buildQueryString(filters: ProspectFilters): string {
-  const params = new URLSearchParams()
-  if (filters.stage) params.set('stage', filters.stage)
-  if (filters.owner_user_id) params.set('owner_user_id', filters.owner_user_id)
-  if (filters.source_type) params.set('source_type', filters.source_type)
-  if (filters.search) params.set('search', filters.search)
-  if (filters.page) params.set('page', String(filters.page))
-  if (filters.page_size) params.set('page_size', String(filters.page_size))
-  const qs = params.toString()
-  return qs ? `?${qs}` : ''
-}
-
 // ── Query Hooks ───────────────────────────────────────────────────────────────
 
 export function useProspects(filters: ProspectFilters = {}) {
   return useQuery({
     queryKey: ['prospects', filters],
-    queryFn: () => apiFetch<ProspectListResponse>(`/api/prospects${buildQueryString(filters)}`),
+    queryFn: () => apiFetch<ProspectListResponse>(`/api/prospects${buildQueryString({ ...filters })}`),
   })
 }
 

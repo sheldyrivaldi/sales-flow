@@ -201,6 +201,95 @@ When a tender or prospect closes with an outcome, an `OutcomeEvent` is created. 
 
 ---
 
+## CompanyProfile & knowledge base ("Otak Agent")
+
+The knowledge base guides discovery (EP-12) and scoring (EP-10). `CompanyProfile`
+is the versioned root; `TargetCriteria`, `NoGoRule`, and `KeywordSet` are its
+children, each carrying a `profile_id` FK. Every `PUT /api/profile` clones the
+current version's children into a brand-new version (full snapshot) rather
+than mutating them in place, so prior versions remain queryable as history.
+Only one `CompanyProfile` row has `is_current=true` at a time, enforced by a
+partial unique index — `ProfileRepo.CreateVersion` flips the old row to
+`is_current=false` before inserting the new one, inside a transaction.
+
+### CompanyProfile
+
+Table: `company_profile`
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | UUID | Primary key |
+| `company_name` | TEXT | Not null |
+| `one_liner` | TEXT | — |
+| `service_categories` | JSONB | Array of strings |
+| `tech_stack` | JSONB | Array of strings |
+| `source_doc_refs` | JSONB | Array of strings (PDF ingest refs, EP-13) |
+| `version` | INT | Increments on every `PUT` |
+| `is_current` | BOOLEAN | Exactly one `true` row at a time (partial unique index) |
+| `created_at` / `updated_at` | TIMESTAMPTZ | — |
+
+### TargetCriteria
+
+Table: `target_criteria` — one row per `CompanyProfile` version (`profile_id` unique).
+
+| Field | Type | Notes |
+|---|---|---|
+| `countries` | JSONB | Array of strings; default `["Indonesia"]` |
+| `industries` | JSONB | Array of strings |
+| `value_min` / `value_ideal` / `value_max` | NUMERIC | ≥ 0; default `value_min` = 1,000,000,000 (Rp 1 miliar) |
+| `currency` | TEXT | Default `IDR` |
+| `deadline_min_days` | INT | ≥ 0; default 7 |
+| `procurement_types` | JSONB | Array of strings; default preset (Barang, Jasa Konsultansi, Jasa Lainnya, Pekerjaan Konstruksi) |
+
+### NoGoRule
+
+Table: `nogo_rule` — one row per `CompanyProfile` version (`profile_id` unique).
+
+| Field | Type | Notes |
+|---|---|---|
+| `preset_flags` | JSONB | Array of strings |
+| `custom` | JSONB | Array of free-text rules |
+
+### KeywordSet
+
+Table: `keyword_set` — zero or more rows per `CompanyProfile` version (one per category).
+
+| Field | Type | Notes |
+|---|---|---|
+| `category` | TEXT | Nullable |
+| `keywords` | JSONB | Array of strings |
+| `negative_keywords` | JSONB | Array of strings |
+| `language` | TEXT | Default `id` |
+
+### Source
+
+Table: `source` — global, **not** versioned with `CompanyProfile`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `name` | TEXT | Not null |
+| `url` | TEXT | Not null; validated as a URL on write |
+| `country` | TEXT | — |
+| `access` | TEXT | `publik`, `login`, or `manual` (default `publik`) |
+| `legal_note` | TEXT | — |
+| `enabled` | BOOLEAN | Default false |
+| `priority` | INT | Default 0 |
+| `preset_key` | TEXT | Set when the row came from the hardcoded Indonesia preset catalog; unique when non-null (makes preset activation idempotent) |
+
+**Enum: `SourceAccess`** — `publik`, `login`, `manual`. Sources with `access != publik` are marked but not auto-crawled (PRD §9 compliance).
+
+The preset catalog (`GET /api/sources/presets`) is hardcoded in
+`internal/service/source_service.go`: SPSE/Inaproc (LKPP), eProc PLN, eProc
+Pertamina, Telkom SMILE, PaDi UMKM. `POST /api/sources/presets {key}` activates
+one — idempotent: re-activating an already-active preset just re-asserts
+`enabled=true` on the existing row instead of creating a duplicate.
+
+Endpoints: `GET/PUT /api/profile` (RBAC: read = all roles, write = `EditProfile`
+i.e. OPS/MANAGER/ADMIN); `GET/POST/PUT/DELETE /api/sources` + `GET/POST
+/api/sources/presets` (RBAC: read = all roles, write = `EditProfile`).
+
+---
+
 ## Migrations
 
 Migrations are applied **manually** (not automatically on boot) via golang-migrate CLI:
@@ -218,6 +307,7 @@ Migration files (in order):
 5. **0005_outcome_events** — Creates `outcome_event` table + indexes.
 6. **0006_events** — Creates `event` table + indexes.
 7. **0007_prospects** — Creates `prospect` table + indexes.
+8. **0008_profile** — Creates `company_profile`, `target_criteria`, `nogo_rule`, `keyword_set`, `source` tables + indexes.
 
 Each migration has `.up.sql` (apply) and `.down.sql` (rollback) files.
 
@@ -227,14 +317,9 @@ Each migration has `.up.sql` (apply) and `.down.sql` (rollback) files.
 
 These are specified in the PRD and supported by the Hermes bridge, but not yet implemented as tables or HTTP routes:
 
-- **company_profile** — Company knowledge base (industry, capabilities, verticals, etc.)
-- **source** — Crawling sources (procurement portals, APIs, etc.)
 - **discovery_run** — A scheduled or on-demand crawling job
 - **prospect_score** — Per-prospect AI scoring (distinct from tender scoring)
 - **playbook** — Versioned playbook template (structured bid strategy)
 - **report** — Generated report (daily digest, pipeline, per-opportunity)
-- **target_criteria** — Buyer/opportunity scoring weights
-- **nogo_rule** — No-go conditions (auto-reject opportunities)
-- **keyword_set** — Search keywords for discovery
 
 When these are wired in, they will follow the same data model principles: UUID PKs, timestamps, no `organization_id`, and GORM singular table names.

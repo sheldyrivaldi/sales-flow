@@ -56,6 +56,17 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) *echo.Echo {
 	prospectSvc := service.NewProspectService(prospectRepo, outcomeRepo, service.NoopLearningHook())
 	prospectH := handlers.NewProspectHandler(prospectSvc)
 
+	profileRepo := repository.NewProfileRepo(db)
+	profileSvc := service.NewProfileService(profileRepo)
+	profileH := handlers.NewProfileHandler(profileSvc)
+
+	sourceRepo := repository.NewSourceRepo(db)
+	sourceSvc := service.NewSourceService(sourceRepo)
+	sourceH := handlers.NewSourceHandler(sourceSvc)
+
+	keywordSvc := service.NewKeywordService(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
+	keywordH := handlers.NewKeywordHandler(keywordSvc)
+
 	api := e.Group("/api")
 
 	// Public auth routes (no JWT required).
@@ -104,6 +115,26 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) *echo.Echo {
 	prospects.PUT("/:id", prospectH.Update)
 	prospects.DELETE("/:id", prospectH.Delete)
 	prospects.PATCH("/:id/stage", prospectH.UpdateStage)
+
+	// Profile ("Otak Agent") — GET boleh semua role (SALES read-only),
+	// PUT (buat versi baru) hanya OPS/MANAGER/ADMIN.
+	profile := authd.Group("/profile")
+	profile.GET("", profileH.Get, auth.RequireCapability(auth.CapViewData))
+	profile.PUT("", profileH.Update, auth.RequireCapability(auth.CapEditProfile))
+	profile.POST("/keywords/generate", keywordH.Generate, auth.RequireCapability(auth.CapEditProfile))
+
+	// Sources — read (CapViewData) semua role; mutasi & aktivasi preset
+	// (CapEditProfile) OPS/MANAGER/ADMIN. "/presets" didaftarkan sebelum
+	// "/:id" agar tidak tertangkap sebagai parameter route.
+	sources := authd.Group("/sources")
+	sources.GET("", sourceH.List, auth.RequireCapability(auth.CapViewData))
+	sources.GET("/presets", sourceH.Presets, auth.RequireCapability(auth.CapViewData))
+	sources.GET("/:id", sourceH.Get, auth.RequireCapability(auth.CapViewData))
+	sourcesEdit := sources.Group("", auth.RequireCapability(auth.CapEditProfile))
+	sourcesEdit.POST("", sourceH.Create)
+	sourcesEdit.POST("/presets", sourceH.ActivatePreset)
+	sourcesEdit.PUT("/:id", sourceH.Update)
+	sourcesEdit.DELETE("/:id", sourceH.Delete)
 
 	// Chat — semua role yang punya CapUseAI.
 	convs := authd.Group("/conversations", auth.RequireCapability(auth.CapUseAI))

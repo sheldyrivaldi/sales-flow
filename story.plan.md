@@ -297,29 +297,29 @@ Estimasi: **S** ≈ ≤0.5 hari · **M** ≈ 0.5–1.5 hari · **L** ≈ 2–4 h
 
 ## EP-08 — Knowledge / Company Profile (Otak Agent)
 
-### ST-08.1 — Entities profil + migrasi + versioning `[P0 · L]`
+### ✅ ST-08.1 — Entities profil + migrasi + versioning `[P0 · L]`
 - *As the system, I want simpan "otak" agent ter-versi.* **AC:** tabel `company_profile`, `target_criteria`, `nogo_rule`, `source`, `keyword_set` (field §10); mekanisme versi (mis. `version` + snapshot/`is_current`); satu profil aktif (single-org).
-- **Teknis:** migrasi, domain, repo. **Dep:** ST-00.4.
+- **Teknis:** migrasi, domain, repo. **Dep:** ST-00.4. ✓ **DONE**
 
-### ST-08.2 — Profile read/write + defaults/preset `[P0 · L]`
+### ✅ ST-08.2 — Profile read/write + defaults/preset `[P0 · L]`
 - *As Ops, I want isi/ubah profil dengan default so that cepat aktif.* **AC:** `GET /api/profile` (versi terbaru), `PUT /api/profile` (buat versi baru); default (value_min Rp 1.000.000.000, deadline_min_days 7, countries=[Indonesia]); profil dipakai discovery/scoring; **RBAC: OPS/MANAGER/ADMIN** (SALES read-only).
-- **Teknis:** `profile_handler.go`, preset seed. **Dep:** ST-08.1, ST-03.3.
+- **Teknis:** `profile_handler.go`, preset seed. **Dep:** ST-08.1, ST-03.3. ✓ **DONE**
 
-### ST-08.3 — Source management `[P0 · M]`
+### ✅ ST-08.3 — Source management `[P0 · M]`
 - *As Ops, I want kelola sumber crawling.* **AC:** CRUD `source` (`name*,url*,country,access[publik/login/manual],legal_note,enabled,priority`); preset Indonesia (SPSE/Inaproc LKPP, eProc PLN, Pertamina, Telkom/SMILE, PaDi UMKM) bisa diaktifkan 1-klik; validasi URL; sumber Login/Manual ditandai (kepatuhan §9).
-- **Teknis:** `source_handler.go`, preset. **Dep:** ST-08.2.
+- **Teknis:** `source_handler.go`, preset. **Dep:** ST-08.2. ✓ **DONE**
 
-### ST-08.4 — Keyword set + auto-generate `[P0 · M]`
-- *As Ops, I want keyword otomatis dari kapabilitas.* **AC:** `keyword_set` CRUD; keyword di-generate dari `service_categories` (bisa edit); `negative_keywords` preset; `language`.
-- **Teknis:** `keyword_handler.go`, generator. **Dep:** ST-08.2.
+### ✅ ST-08.4 — Keyword set + auto-generate `[P0 · M]`
+- *As Ops, I want keyword otomatis dari kapabilitas.* **AC:** keyword di-generate (draft) dari `service_categories` via `POST /api/profile/keywords/generate` (bisa diedit lalu disimpan lewat `PUT /api/profile`, menjaga versioning `keyword_set`); `negative_keywords` preset deterministik + hasil AI ter-merge/dedup; `language` default `id`; degrade graceful bila Hermes mati.
+- **Teknis:** `keyword_handler.go`, `keyword_service.go`, `dto/keyword.go`, generator berbasis Hermes `GenerateJSON`. **Dep:** ST-08.2. ✓ **DONE**
 
-### ST-08.5 — FE Onboarding lean `[P0 · L]`
+### ✅ ST-08.5 — FE Onboarding lean `[P0 · L]`
 - *As a new user, I want setup cepat < 2 menit so that discovery bisa mulai.* **AC:** Design §4.2: dua jalur (Upload PDF / Isi manual), stepper ringan, "Lewati atur nanti", akhir "Aktifkan Agent" → memicu discovery pertama → arahkan ke Penemuan AI; skip → banner di Dashboard.
-- **Teknis:** `src/pages/onboarding/Onboarding.tsx` (jalur PDF placeholder hingga EP-13). **Dep:** ST-02.4, ST-08.2.
+- **Teknis:** `src/pages/onboarding/Onboarding.tsx` (jalur PDF placeholder hingga EP-13), `src/api/profile.ts`, `src/api/keywords.ts`, `src/components/OtakAgentBanner.tsx`. **Dep:** ST-02.4, ST-08.2. ✓ **DONE**
 
-### ST-08.6 — FE Otak Agent edit (6 kartu) `[P0 · L]`
-- *As Ops, I want halaman edit profil lean.* **AC:** Design §4.13: 6 kartu (Profil/Kapabilitas/Target/No-Go/Sumber&Keyword/Scoring advanced collapsed), chip preset + toggle + slider bobot, Simpan sticky, badge "diperbarui {waktu}", sub-tab Sumber (tabel + badge akses), tooltip per field, field hasil PDF ditandai "diisi AI ✨".
-- **Teknis:** `src/pages/profile/OtakAgent.tsx` + sub-komponen kartu. **Dep:** ST-08.2, ST-08.3, ST-08.4.
+### ✅ ST-08.6 — FE Otak Agent edit (6 kartu) `[P0 · L]`
+- *As Ops, I want halaman edit profil lean.* **AC:** Design §4.13: 6 kartu (Profil/Kapabilitas/Target/No-Go/Sumber&Keyword/Scoring advanced collapsed), chip preset + toggle no-go, Simpan sticky, badge "diperbarui {waktu}", sub-tab Sumber (tabel + preset 1-klik + badge akses + CRUD), tooltip per field. Kartu 6 (bobot scoring) & field hasil PDF "diisi AI ✨" adalah placeholder/menunggu EP-10/EP-13.
+- **Teknis:** `src/pages/profile/OtakAgent.tsx` + sub-komponen kartu (`src/components/profile/*`), `src/api/sources.ts`. **Dep:** ST-08.2, ST-08.3, ST-08.4. ✓ **DONE**
 
 ---
 

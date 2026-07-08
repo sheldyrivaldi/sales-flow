@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiFetch } from '../lib/api'
+import { apiFetch, buildQueryString } from '../lib/api'
 import type { RecommendedAction } from '../lib/score'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -100,27 +100,12 @@ export function labelToAction(l: RecommendedAction): TenderApiAction {
   return map[l]
 }
 
-function buildQueryString(filters: TenderFilters): string {
-  const params = new URLSearchParams()
-  if (filters.status) params.set('status', filters.status)
-  if (filters.buyer) params.set('buyer', filters.buyer)
-  if (filters.recommended_action) params.set('recommended_action', filters.recommended_action)
-  if (filters.origin) params.set('origin', filters.origin)
-  if (filters.deadline_from) params.set('deadline_from', filters.deadline_from)
-  if (filters.deadline_to) params.set('deadline_to', filters.deadline_to)
-  if (filters.search) params.set('search', filters.search)
-  if (filters.page) params.set('page', String(filters.page))
-  if (filters.page_size) params.set('page_size', String(filters.page_size))
-  const qs = params.toString()
-  return qs ? `?${qs}` : ''
-}
-
 // ── Query Hooks ───────────────────────────────────────────────────────────────
 
 export function useTenders(filters: TenderFilters = {}) {
   return useQuery({
     queryKey: ['tenders', filters],
-    queryFn: () => apiFetch<TenderListResponse>(`/api/tenders${buildQueryString(filters)}`),
+    queryFn: () => apiFetch<TenderListResponse>(`/api/tenders${buildQueryString({ ...filters })}`),
   })
 }
 

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiFetch } from '../lib/api'
+import { apiFetch, buildQueryString } from '../lib/api'
 import type { Prospect } from './prospects'
 
 export type { Prospect }
@@ -66,23 +66,12 @@ export const EVENT_STATUS_LABELS: Record<EventStatus, string> = {
   CANCELLED: 'Dibatalkan',
 }
 
-function buildQueryString(filters: EventFilters): string {
-  const params = new URLSearchParams()
-  if (filters.type) params.set('type', filters.type)
-  if (filters.status) params.set('status', filters.status)
-  if (filters.search) params.set('search', filters.search)
-  if (filters.page) params.set('page', String(filters.page))
-  if (filters.page_size) params.set('page_size', String(filters.page_size))
-  const qs = params.toString()
-  return qs ? `?${qs}` : ''
-}
-
 // ── Query Hooks ───────────────────────────────────────────────────────────────
 
 export function useEvents(filters: EventFilters = {}) {
   return useQuery({
     queryKey: ['events', filters],
-    queryFn: () => apiFetch<EventListResponse>(`/api/events${buildQueryString(filters)}`),
+    queryFn: () => apiFetch<EventListResponse>(`/api/events${buildQueryString({ ...filters })}`),
   })
 }
 

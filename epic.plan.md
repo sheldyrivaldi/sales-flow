@@ -188,7 +188,7 @@ EP-10/12/14 ─▶ EP-16 (learning) ; semua ─▶ EP-17 (telemetry) ; EP-01/03 
 - **DoD:** pindah kartu menyimpan stage (optimistic + rollback saat gagal); konversi dari event/tender membuat tautan sumber.
 - **Risiko:** state board kompleks → pakai dnd-kit + TanStack Query invalidation.
 
-### EP-08 — Knowledge / Company Profile (Otak Agent) `[P0 · M2]`
+### ✅ EP-08 — Knowledge / Company Profile (Otak Agent) `[P0 · M2]` — **DONE (ST-08.1–08.6)**
 - **Tujuan:** "otak" agent diisi lean (6 kartu) + versioning; jadi sumber kebenaran discovery/scoring.
 - **Scope in:** entity `company_profile`, `target_criteria`, `nogo_rule`, `source`, `keyword_set` (§10); endpoint baca/tulis + versioning; preset Indonesia (sumber & keyword) + default; FE Onboarding lean (Design §4.2: dua jalur, target < 2 menit) + halaman edit 6 kartu (§4.13) + sub-tab Sumber (badge akses Publik/Login/Manual) + Scoring advanced collapsed (slider bobot).
 - **Scope out:** PDF ingest (EP-13) & crawling (EP-12) & MCP expose (EP-09).
@@ -196,6 +196,7 @@ EP-10/12/14 ─▶ EP-16 (learning) ; semua ─▶ EP-17 (telemetry) ; EP-01/03 
 - **Dependency:** EP-02, EP-03.
 - **DoD:** quick start bisa selesai dengan minimal input (kapabilitas + 1 negara + nilai min) lalu "Aktifkan Agent"; profil ter-versi; badge "diperbarui {waktu}".
 - **Risiko:** form membludak → tegakkan prinsip lean (mayoritas opsional, chip preset, default).
+- **Progres:** ST-08.1 (migrasi `0008_profile` + domain/repo ber-versi, snapshot penuh), ST-08.2 (`GET`/`PUT /api/profile` + default preset + RBAC), ST-08.3 (CRUD `source` + katalog preset Indonesia 1-klik) **selesai & diverifikasi end-to-end** (`go build`/`vet`/`test` hijau + `curl` RBAC/validasi/versioning). ST-08.4 (keyword auto-generate), ST-08.5 (FE Onboarding), ST-08.6 (FE Otak Agent 6 kartu) **belum dikerjakan**.
 
 ### EP-09 — MCP Server & Sales Data Tools `[P0 · M2–M3]`
 - **Tujuan:** expose data sales ke Hermes via HTTP MCP (read aman + write gated), termasuk `get_company_profile`.
