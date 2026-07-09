@@ -325,21 +325,21 @@ Estimasi: **S** ≈ ≤0.5 hari · **M** ≈ 0.5–1.5 hari · **L** ≈ 2–4 h
 
 ## EP-09 — MCP Server & Sales Data Tools
 
-### ST-09.1 — MCP server bootstrap + register `[P0 · M]`
+### ✅ ST-09.1 — MCP server bootstrap + register `[P0 · M]`
 - *As the system, I want server MCP so that Hermes bisa baca data.* **AC:** HTTP MCP (mark3labs/mcp-go) di `/mcp`, Bearer `${SALES_MCP_TOKEN}`; terdaftar di `deploy/hermes/config.yaml` (`mcp_servers.sales`, `supports_parallel_tool_calls:true`).
-- **Teknis:** `internal/mcp/server.go`, config Hermes. **Dep:** ST-00.2, ST-01.x.
+- **Teknis:** `internal/mcp/server.go`, config Hermes. **Dep:** ST-00.2, ST-01.x. ✓ **DONE** (diverifikasi end-to-end nyata: Postgres via `docker compose` + `go run ./apps/api`, `/mcp` 401 tanpa/token salah, `initialize` sukses dengan token benar; `deploy/hermes/config.yaml.example` sudah cocok persis — lihat catatan gap sisi `hermes-bridge` di `epic.plan.md` EP-09.)
 
-### ST-09.2 — Read tools `[P0 · L]`
+### ✅ ST-09.2 — Read tools `[P0 · L]`
 - *As the agent, I want baca data sales.* **AC:** tools `list_tenders`, `get_tender`, `search_tenders`, `list_events`, `get_event`, `list_prospects`, `get_prospect`, `get_pipeline_summary`, `get_revenue_summary`, `get_company_profile` — schema input/output stabil, baca dari repo.
-- **Teknis:** `internal/mcp/tools_read.go`. **Dep:** ST-09.1, entity EP-05/06/07/08.
+- **Teknis:** `internal/mcp/tools_read.go`. **Dep:** ST-09.1, entity EP-05/06/07/08. ✓ **DONE** (10 tool, diverifikasi `tools/list` + `tools/call` terhadap Postgres nyata; `get_pipeline_summary`/`get_revenue_summary` baru — `ProspectRepository.SummaryByStage` ditambahkan.)
 
-### ST-09.3 — Write tools (gated) `[P0 · M]`
+### ✅ ST-09.3 — Write tools (gated) `[P0 · M]`
 - *As the agent, I want usul aksi terbatas.* **AC:** `update_prospect_stage`, `save_playbook_draft` hanya yang di-whitelist (`tools.include`); aksi tercatat audit; human-in-the-loop (tidak final tanpa konfirmasi).
-- **Teknis:** `internal/mcp/tools_write.go`, whitelist. **Dep:** ST-09.1, ST-07.2.
+- **Teknis:** `internal/mcp/tools_write.go`, whitelist. **Dep:** ST-09.1, ST-07.2. ✓ **DONE** (`writeToolWhitelist` menjaga hanya 2 tool ini bisa terdaftar; `audit_log`+`playbook_draft` — tabel baru, migrasi `0009`/`0010` — diverifikasi tertulis end-to-end terhadap Postgres nyata.)
 
-### ST-09.4 — Contract test MCP `[P0 · M]`
+### ✅ ST-09.4 — Contract test MCP `[P0 · M]`
 - *As a maintainer, I want jaminan round-trip MCP.* **AC:** test menembak Hermes nyata → chat memicu `list_tenders` → hasil dipakai; schema tool tidak berubah (aditif saja).
-- **Teknis:** `internal/mcp/contract_test.go`. **Dep:** ST-09.2.
+- **Teknis:** `internal/mcp/contract_test.go`. **Dep:** ST-09.2. ✓ **DONE** (test ditulis & terverifikasi kompilasi + skip-bersih via `go test -tags contract`, pola sama `internal/hermes/contract_test.go`; **belum pernah benar-benar jalan terhadap Hermes nyata** — lihat catatan gap `hermes-bridge` di `epic.plan.md` EP-09. Ditambah 9 test in-process deterministik di `internal/mcp/mcp_test.go` untuk CI.)
 
 ---
 

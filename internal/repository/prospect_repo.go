@@ -85,3 +85,17 @@ func (r *ProspectRepo) Delete(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// SummaryByStage returns count and total est_value grouped by stage, for the
+// MCP get_pipeline_summary/get_revenue_summary tools (EP-09).
+func (r *ProspectRepo) SummaryByStage(ctx context.Context) ([]domain.ProspectStageSummary, error) {
+	var rows []domain.ProspectStageSummary
+	err := r.db.WithContext(ctx).Model(&domain.Prospect{}).
+		Select("stage, count(*) as count, coalesce(sum(est_value), 0) as total_value").
+		Group("stage").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("prospect.SummaryByStage: %w", err)
+	}
+	return rows, nil
+}

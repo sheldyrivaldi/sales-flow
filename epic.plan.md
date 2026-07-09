@@ -198,7 +198,7 @@ EP-10/12/14 ─▶ EP-16 (learning) ; semua ─▶ EP-17 (telemetry) ; EP-01/03 
 - **Risiko:** form membludak → tegakkan prinsip lean (mayoritas opsional, chip preset, default).
 - **Progres:** ST-08.1 (migrasi `0008_profile` + domain/repo ber-versi, snapshot penuh), ST-08.2 (`GET`/`PUT /api/profile` + default preset + RBAC), ST-08.3 (CRUD `source` + katalog preset Indonesia 1-klik) **selesai & diverifikasi end-to-end** (`go build`/`vet`/`test` hijau + `curl` RBAC/validasi/versioning). ST-08.4 (keyword auto-generate), ST-08.5 (FE Onboarding), ST-08.6 (FE Otak Agent 6 kartu) **belum dikerjakan**.
 
-### EP-09 — MCP Server & Sales Data Tools `[P0 · M2–M3]`
+### ✅ EP-09 — MCP Server & Sales Data Tools `[P0 · M2–M3]` — **DONE (ST-09.1–09.4, sisi Go)**
 - **Tujuan:** expose data sales ke Hermes via HTTP MCP (read aman + write gated), termasuk `get_company_profile`.
 - **Scope in:** `internal/mcp` server di `/mcp` (Bearer `${SALES_MCP_TOKEN}`); read tools: `list_tenders`, `get_tender`, `search_tenders`, `list_events`, `get_event`, `list_prospects`, `get_prospect`, `get_pipeline_summary`, `get_revenue_summary`, `get_company_profile`; write tools (gated/whitelist): `update_prospect_stage`, `save_playbook_draft`; config Hermes `mcp_servers.sales`.
 - **Scope out:** logika scoring (EP-10).
@@ -206,6 +206,7 @@ EP-10/12/14 ─▶ EP-16 (learning) ; semua ─▶ EP-17 (telemetry) ; EP-01/03 
 - **Dependency:** EP-01, dan entity dari EP-05/06/07/08.
 - **DoD:** round-trip MCP terbukti (chat "tender prioritas?" memanggil `list_tenders`); write tools hanya yang di-whitelist; contract test MCP hijau.
 - **Risiko:** write tool berbahaya → whitelist + human-in-the-loop.
+- **Progres:** ST-09.1–09.4 (server `/mcp` + Bearer constant-time auth, 10 read tools + 2 write tools whitelist-only dengan audit (`audit_log`, `playbook_draft` — baru, forward-compatible EP-14/EP-17), contract test in-process + `//go:build contract`) **selesai & diverifikasi end-to-end**: `go build`/`vet`/`test`/`golangci-lint` hijau; end-to-end nyata via `docker compose` Postgres + `go run ./apps/api` — `/mcp` 401 tanpa/token salah, handshake `initialize` + `tools/list` (12 tool cocok) + `tools/call` (read & write, termasuk verifikasi baris `audit_log` tersimpan) sukses terhadap data Postgres sungguhan. (**Catatan penting:** DoD "chat memicu `list_tenders`" **belum terbukti end-to-end** — diverifikasi bahwa `services/hermes-bridge/app/agent_factory.py` tidak membaca `deploy/hermes/config.yaml` sama sekali (hanya `ENABLED_TOOLSETS` env diteruskan ke `AIAgent`), dan library `hermes-agent` tidak ter-install di environment ini untuk diverifikasi lebih lanjut. Ini gap di sisi `hermes-bridge`/Python, di luar scope kode Go EP-09 — butuh keputusan/kerja terpisah sebelum DoD epic ini benar-benar tuntas.)
 
 ### EP-10 — AI Scoring & Recommendation `[P0 · M3]`
 - **Tujuan:** fit score 0–100 + recommended_action + confidence + reasoning + evidence per dimensi + risk_flags, pakai rubrik §8.

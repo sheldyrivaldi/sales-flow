@@ -13,6 +13,7 @@ import (
 	"salespilot/internal/config"
 	"salespilot/internal/hermes"
 	"salespilot/internal/http/handlers"
+	"salespilot/internal/mcp"
 	"salespilot/internal/repository"
 	"salespilot/internal/service"
 )
@@ -66,6 +67,22 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) *echo.Echo {
 
 	keywordSvc := service.NewKeywordService(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
 	keywordH := handlers.NewKeywordHandler(keywordSvc)
+
+	auditRepo := repository.NewAuditRepo(db)
+	playbookDraftRepo := repository.NewPlaybookDraftRepo(db)
+
+	// MCP server (EP-09) — mounted top-level like /healthz, not under /api,
+	// and authenticated with a static Bearer token (SalesMCPToken), not JWT.
+	mcpSrv := mcp.NewServer(mcp.Deps{
+		Tender:       tenderSvc,
+		Event:        eventSvc,
+		Prospect:     prospectSvc,
+		Profile:      profileSvc,
+		ProspectRepo: prospectRepo,
+		Audit:        auditRepo,
+		Playbook:     playbookDraftRepo,
+	})
+	e.Any("/mcp", echo.WrapHandler(mcp.Handler(mcpSrv)), mcp.BearerAuth(cfg.SalesMCPToken))
 
 	api := e.Group("/api")
 

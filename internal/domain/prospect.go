@@ -72,4 +72,14 @@ type ProspectRepository interface {
 	List(ctx context.Context, f ProspectFilter, page, pageSize int) ([]Prospect, int64, error)
 	Update(ctx context.Context, p *Prospect) error
 	Delete(ctx context.Context, id string) error
+	SummaryByStage(ctx context.Context) ([]ProspectStageSummary, error)
+}
+
+// ProspectStageSummary aggregates prospect count and total est_value for one
+// stage. Used by the MCP get_pipeline_summary/get_revenue_summary tools
+// (EP-09) — there is no dashboard aggregation elsewhere yet (EP-11).
+type ProspectStageSummary struct {
+	Stage      ProspectStage `json:"stage"`
+	Count      int64         `json:"count"`
+	TotalValue float64       `json:"total_value"`
 }
