@@ -345,65 +345,65 @@ Estimasi: **S** ≈ ≤0.5 hari · **M** ≈ 0.5–1.5 hari · **L** ≈ 2–4 h
 
 ## EP-10 — AI Scoring & Recommendation
 
-### ST-10.1 — Scoring service + prompt builder + schema `[P0 · L]`
+### ✅ ST-10.1 — Scoring service + prompt builder + schema `[P0 · L]`
 - *As the backend, I want skor terstruktur.* **AC:** service merakit prompt (tender/prospect + Company Profile + rubrik §8 8-dimensi) → `GenerateJSON` schema `{fit_score 0–100, recommended_action, confidence, reasoning, evidence[], risk_flags[]}`; sesi pakai workspace session key.
-- **Teknis:** `internal/ai/scoring.go`, prompt template, schema. **Dep:** ST-01.3, ST-08.2.
+- **Teknis:** `internal/ai/scoring.go`, prompt template, schema. **Dep:** ST-01.3, ST-08.2. ✓ **DONE** — `Scorer` pakai `hermes.SessionKey(cfg.WorkspaceSessionKey)`; prompt merakit profil+target+no-go+rubrik 8-dimensi persis PRD §8.
 
-### ST-10.2 — Threshold & no-go rule `[P0 · M]`
+### ✅ ST-10.2 — Threshold & no-go rule `[P0 · M]`
 - *As the system, I want rekomendasi konsisten.* **AC:** map skor→action (80–100 Pursue, 65–79 Review, 50–64 Watchlist, <50 Reject); no-go rule → Need Partner / Auto No-Go sesuai §8; deterministik.
-- **Teknis:** `internal/ai/recommend.go`, evaluator no-go. **Dep:** ST-10.1, ST-08.2.
+- **Teknis:** `internal/ai/recommend.go`, evaluator no-go. **Dep:** ST-10.1, ST-08.2. ✓ **DONE** — `RecommendAction` murni deterministik (tak pernah mempercayai `recommended_action` mentah dari LLM); no-go/need_partner jadi sinyal dari LLM (diberi aturan no-go via prompt) yang di-override lewat fungsi ini.
 
-### ST-10.3 — Persist + endpoints + re-score `[P0 · M]`
+### ✅ ST-10.3 — Persist + endpoints + re-score `[P0 · M]`
 - *As a user, I want simpan & ulang analisa.* **AC:** `POST /api/tenders/:id/score`, `POST /api/prospects/:id/score`; simpan `prospect_score` (target_type/target_id/fit_score/confidence/reasoning/evidence jsonb/risk_flags jsonb/model) + update skor pada tender; "Analisa ulang" idempotent; gagal AI → pesan ramah, data utuh; audit.
-- **Teknis:** `internal/ai` + `prospect_score` repo + handler. **Dep:** ST-10.1, ST-05.1, ST-07.1.
+- **Teknis:** `internal/ai` + `prospect_score` repo + handler. **Dep:** ST-10.1, ST-05.1, ST-07.1. ✓ **DONE** (migrasi `0011_prospect_score` — bukan `0008`, lihat catatan task.plan.md; `prospect_score` = **append histori**, bukan upsert, sekaligus jadi jejak audit model/waktu/evidence per run; `GET /api/{tenders,prospects}/:id/score` ditambah sebagai read-path terpisah, keduanya dikonfirmasi via `AskUserQuestion` sebelum implementasi). Diverifikasi end-to-end nyata: Postgres Docker + API native + mock server `/v1/responses` — sukses (persist+denormalisasi tender), gagal AI (400 ramah + data utuh), re-score (append row baru), prospect scoring (tanpa sentuh tender).
 
-### ST-10.4 — FE skor & rekomendasi `[P0 · M]`
+### ✅ ST-10.4 — FE skor & rekomendasi `[P0 · M]`
 - *As a user, I want lihat skor & alasan.* **AC:** score ring berwarna (skala §2.1), badge recommended_action, evidence per dimensi (✓/⚠), risk chips, "Dibuat AI • {confidence} • {waktu}" + "Lihat alasan", tombol "Analisa ulang" dengan streaming/loading; render di Tender Detail (ST-05.6) & Prospect drawer (ST-07.4).
-- **Teknis:** `src/components/AiScorePanel.tsx`. **Dep:** ST-02.4, ST-10.3.
+- **Teknis:** `src/components/AiScorePanel.tsx`. **Dep:** ST-02.4, ST-10.3. ✓ **DONE** — panel digeneralisasi (bukan tender-only) jadi `{targetType, targetId}`, dipasang di kedua layar; "streaming" AC dipenuhi via alternatif "loading" (GenerateJSON bukan API streaming). `tsc -b`/`eslint`/`vite build` hijau; verifikasi visual browser tidak dilakukan (lingkungan CLI).
 
 ---
 
 ## EP-11 — Dashboard
 
-### ST-11.1 — Dashboard summary endpoint `[P1 · M]`
+### ✅ ST-11.1 — Dashboard summary endpoint `[P1 · M]`
 - *As a manager, I want ringkasan terukur.* **AC:** `GET /api/dashboard/summary` → pipeline per stage, estimasi revenue (sum est_value per stage/total), prospek/tender prioritas (skor tinggi), penemuan AI hari ini (count); agregasi SQL efisien.
-- **Teknis:** `dashboard_handler.go`, query agregat + indeks. **Dep:** ST-05/07/10; discovery count degrade bila EP-12 belum ada.
+- **Teknis:** `dashboard_handler.go`, query agregat + indeks. **Dep:** ST-05/07/10; discovery count degrade bila EP-12 belum ada. ✓ **DONE** — `DashboardService` murni read-only, 3 sub-query (`SummaryByStage`, `TopByFitScore`, `CountDiscoveryToday`) degrade natural ke 0/[] tanpa EP-12.
 
-### ST-11.2 — FE Dashboard `[P1 · M]`
+### ✅ ST-11.2 — FE Dashboard `[P1 · M]`
 - *As a user, I want dashboard.* **AC:** stat cards (pipeline/revenue), penemuan AI hari ini, prioritas (score ring), AI insight callout, banner "Lengkapi Otak Agent" bila profil kosong; empty/loading.
-- **Teknis:** `src/pages/Dashboard.tsx`. **Dep:** ST-02.4, ST-11.1.
+- **Teknis:** `src/pages/Dashboard.tsx`. **Dep:** ST-02.4, ST-11.1. ✓ **DONE** — route index diganti dari placeholder; `OtakAgentBanner` disatukan ke dalam halaman ini.
 
 ---
 
 ## EP-12 — Tender Discovery via Hermes & Discovery Inbox
 
-### ST-12.1 — Entity discovery_run + migrasi `[P1 · S]`
+### ✅ ST-12.1 — Entity discovery_run + migrasi `[P1 · S]`
 - *As the system, I want catat run discovery.* **AC:** `discovery_run(started_at,source_ids[],status,found_count,summary,finished_at,correlation_key)`.
-- **Teknis:** migrasi, domain, repo. **Dep:** ST-00.4.
+- **Teknis:** migrasi, domain, repo. **Dep:** ST-00.4. ✓ **DONE** — migrasi `0012_discovery` (nomor bergeser dari `0009` di draft plan karena EP-09/10 sudah memakai s.d. `0011`).
 
-### ST-12.2 — Discovery orchestrator + compliance `[P1 · L]`
+### ✅ ST-12.2 — Discovery orchestrator + compliance `[P1 · L]`
 - *As Ops, I want agent menemukan tender legal.* **AC:** orchestrator pakai Company Profile (sumber enabled/keyword/target/no-go) → Hermes crawling/browser tools → ekstrak field tender → scoring (EP-10) → simpan `origin=discovery`; **§9: tidak bypass CAPTCHA/login/paywall**; sumber Login/Manual hanya ditandai (tidak dibobol); prioritas API/RSS/portal resmi.
-- **Teknis:** `internal/ai/discovery.go`, integrasi `hermes` + `mcp`. **Dep:** ST-08.x, ST-10.x, ST-01.x.
+- **Teknis:** `internal/ai/discovery.go`, integrasi `hermes` + `mcp`. **Dep:** ST-08.x, ST-10.x, ST-01.x. ✓ **DONE** — seam `Crawler` interface (dikonfirmasi user) memisahkan pipeline inti (teruji via fake) dari implementasi live `hermesCrawler` (Hermes `Chat`+`GenerateJSON`, isolasi gap hermes-bridge web-toolset dari EP-09). Compliance guard `filterCrawlableSources` + audit `crawl_source`/`skip_source_noncompliant`. Skor+simpan via `DiscoveryService.runOnce` (EP-10 `ScoreService` reuse).
 
-### ST-12.3 — Dedup + idempotency `[P1 · M]`
+### ✅ ST-12.3 — Dedup + idempotency `[P1 · M]`
 - *As the system, I want hindari duplikat.* **AC:** `dedup_key = hash(buyer+title+deadline)`; tender sama dari beberapa sumber digabung ("ditemukan di N sumber"); run idempotent (correlation/idempotency key).
-- **Teknis:** dedup di service + unique index. **Dep:** ST-12.2, ST-05.1.
+- **Teknis:** dedup di service + unique index. **Dep:** ST-12.2, ST-05.1. ✓ **DONE** — `ai.ComputeDedupKey` (ternormalisasi, stabil) + `TenderRepository.GetByDedupKey`; race unique-violation ditangani sebagai duplikat, bukan error. `DiscoveryService.StartRun`/`ExecuteRun` idempoten via `discovery_run.correlation_key`.
 
-### ST-12.4 — Run endpoints + async + rate limit `[P1 · M]`
+### ✅ ST-12.4 — Run endpoints + async + rate limit `[P1 · M]`
 - *As Ops, I want jalankan & pantau discovery.* **AC:** `POST /api/discovery/run` (async, kembalikan run id), `GET /api/discovery/runs`, `GET /api/discovery/inbox` (tender origin=discovery belum direview); rate limit + backoff per sumber; status run live.
-- **Teknis:** `discovery_handler.go`, worker/goroutine + queue. **Dep:** ST-12.2.
+- **Teknis:** `discovery_handler.go`, worker/goroutine + queue. **Dep:** ST-12.2. ✓ **DONE** — async via goroutine + **detached context** (bukan queue infra — tak diperlukan untuk skala ini), pola sama `chat_handler.go`. Inbox = `origin=discovery AND status=IDENTIFIED AND reviewed_at IS NULL` (kolom `reviewed_at` baru, migrasi `0013`). Rate limit/backoff per-sumber di `hermesCrawler` (refactor dari 1 prompt gabungan → loop per-sumber). **2 bug nyata ditemukan & diperbaiki saat verifikasi e2e** (lihat task.plan.md): `SourceIDs` nil→NOT NULL violation; `CandidateTender` tanpa json tag→field snake_case gagal bind diam-diam.
 
-### ST-12.5 — Scheduling `[P1 · M]`
+### ✅ ST-12.5 — Scheduling `[P1 · M]`
 - *As Ops, I want jadwal discovery.* **AC:** `crawl_frequency` (Harian/2–3x/Mingguan) memicu run terjadwal (cron Hermes atau scheduler internal); menghormati rate limit; bisa dimatikan.
-- **Teknis:** scheduler + config. **Dep:** ST-12.4, ST-08.3.
+- **Teknis:** scheduler + config. **Dep:** ST-12.4, ST-08.3. ✓ **DONE** (dikonfirmasi user: ticker Go internal, bukan cron Hermes) — `internal/ai/scheduler.go`; `crawl_frequency`/`crawl_enabled` ditambah ke `company_profile` (migrasi `0014`, default `harian`/`false`); key terjadwal deterministik per-periode reuse idempotency `StartRun`.
 
-### ST-12.6 — FE Penemuan AI inbox `[P1 · L]`
+### ✅ ST-12.6 — FE Penemuan AI inbox `[P1 · L]`
 - *As a user, I want tinjau temuan.* **AC:** Design §4.3: header (Jalankan pencarian + status "terakhir Xj • N baru"), filter (rekomendasi/sumber/negara/min skor/deadline), kartu (score ring + recommended_action badge + judul + buyer + sumber + deadline badge + nilai + risk chips + alasan 1 baris + aksi Tinjau/Pursue/Watchlist/Tolak), dedup tampil, progress crawl, empty states (profil kosong / tidak ada hasil).
-- **Teknis:** `src/pages/discovery/DiscoveryInbox.tsx`. **Dep:** ST-02.4, ST-12.4.
+- **Teknis:** `src/pages/discovery/DiscoveryInbox.tsx`. **Dep:** ST-02.4, ST-12.4. ✓ **DONE** (filter Rekomendasi+Min Skor penuh berfungsi server-side; filter Sumber/Negara/Deadline tak diimplementasi sebagai dropdown terpisah — di luar scope MVP, field tetap tampil di kartu).
 
-### ST-12.7 — Promote & Tolak (learning) `[P1 · M]`
+### ✅ ST-12.7 — Promote & Tolak (learning) `[P1 · M]`
 - *As a user, I want aksi cepat dari inbox.* **AC:** Pursue → promote ke pipeline tender (ST-05.4); Watchlist → tandai; Tolak → minta alasan singkat → simpan untuk pembelajaran (EP-16); aksi optimistic.
-- **Teknis:** wiring ke ST-05.4 + outcome/reject store. **Dep:** ST-12.6, ST-05.4.
+- **Teknis:** wiring ke ST-05.4 + outcome/reject store. **Dep:** ST-12.6, ST-05.4. ✓ **DONE** — Pursue reuse `Promote` (ST-05.4) apa adanya; Watchlist & Tolak melalui satu endpoint generik baru `TenderService.Review`/`POST /api/tenders/:id/review` (set `reviewed_at` + audit_log `discovery_review` dgn alasan, untuk EP-16 nanti). "Optimistic" = loading state per-tombol + refetch (bukan cache-splice manual — disproporsional untuk query inbox yang ter-filter/paginasi).
 
 ---
 

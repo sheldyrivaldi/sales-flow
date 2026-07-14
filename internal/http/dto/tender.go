@@ -61,33 +61,43 @@ type TenderOutcomeRequest struct {
 	Notes  *string `json:"notes"  validate:"omitempty"`
 }
 
+// --- Review (Discovery Inbox Watchlist/Tolak) ---
+
+type TenderReviewRequest struct {
+	// Reason is optional free text (e.g. why a discovery-origin tender was
+	// rejected) — recorded to audit_log for future learning (EP-16), not
+	// stored on the tender row.
+	Reason *string `json:"reason" validate:"omitempty"`
+}
+
 // --- Response ---
 
 type TenderResponse struct {
-	ID                      string             `json:"id"`
-	Title                   string             `json:"title"`
-	BuyerName               *string            `json:"buyer_name"`
-	BuyerCountry            *string            `json:"buyer_country"`
-	BuyerIndustry           *string            `json:"buyer_industry"`
-	ValueEstimate           *float64           `json:"value_estimate"`
-	Currency                string             `json:"currency"`
-	PublishedDate           *time.Time         `json:"published_date"`
-	SubmissionDeadline      *time.Time         `json:"submission_deadline"`
-	SourceName              *string            `json:"source_name"`
-	SourceURL               *string            `json:"source_url"`
-	ServiceCategory         *string            `json:"service_category"`
-	ScopeSummary            *string            `json:"scope_summary"`
-	EligibilityRequirements *string            `json:"eligibility_requirements"`
-	TechnicalRequirements   *string            `json:"technical_requirements"`
-	Status                  string             `json:"status"`
-	FitScore                *int               `json:"fit_score"`
-	RecommendedAction       *string            `json:"recommended_action"`
-	RiskFlags               json.RawMessage    `json:"risk_flags"`
-	ReasoningSummary        *string            `json:"reasoning_summary"`
-	DedupKey                *string            `json:"dedup_key"`
-	Origin                  string             `json:"origin"`
-	CreatedAt               time.Time          `json:"created_at"`
-	UpdatedAt               time.Time          `json:"updated_at"`
+	ID                      string          `json:"id"`
+	Title                   string          `json:"title"`
+	BuyerName               *string         `json:"buyer_name"`
+	BuyerCountry            *string         `json:"buyer_country"`
+	BuyerIndustry           *string         `json:"buyer_industry"`
+	ValueEstimate           *float64        `json:"value_estimate"`
+	Currency                string          `json:"currency"`
+	PublishedDate           *time.Time      `json:"published_date"`
+	SubmissionDeadline      *time.Time      `json:"submission_deadline"`
+	SourceName              *string         `json:"source_name"`
+	SourceURL               *string         `json:"source_url"`
+	ServiceCategory         *string         `json:"service_category"`
+	ScopeSummary            *string         `json:"scope_summary"`
+	EligibilityRequirements *string         `json:"eligibility_requirements"`
+	TechnicalRequirements   *string         `json:"technical_requirements"`
+	Status                  string          `json:"status"`
+	FitScore                *int            `json:"fit_score"`
+	RecommendedAction       *string         `json:"recommended_action"`
+	RiskFlags               json.RawMessage `json:"risk_flags"`
+	ReasoningSummary        *string         `json:"reasoning_summary"`
+	DedupKey                *string         `json:"dedup_key"`
+	Origin                  string          `json:"origin"`
+	ReviewedAt              *time.Time      `json:"reviewed_at"`
+	CreatedAt               time.Time       `json:"created_at"`
+	UpdatedAt               time.Time       `json:"updated_at"`
 }
 
 // --- List response ---
@@ -129,6 +139,7 @@ func ToTenderResponse(t domain.Tender) TenderResponse {
 		ReasoningSummary:        t.ReasoningSummary,
 		DedupKey:                t.DedupKey,
 		Origin:                  string(t.Origin),
+		ReviewedAt:              t.ReviewedAt,
 		CreatedAt:               t.CreatedAt,
 		UpdatedAt:               t.UpdatedAt,
 	}

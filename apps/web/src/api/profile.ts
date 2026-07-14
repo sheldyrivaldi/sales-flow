@@ -78,6 +78,23 @@ export interface ProfileUpdateBody {
   keywords?: KeywordSetBody[]
 }
 
+// --- PDF Ingest (EP-13) ---
+
+export interface ProfileDraft {
+  company_name: string
+  one_liner: string
+  service_categories: string[]
+  tech_stack: string[]
+}
+
+export interface IngestResponse {
+  doc_ref: string
+  filename: string
+  size: number
+  draft: ProfileDraft | null
+  degraded: boolean
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** version=0 is the never-saved default template (profile_service.go defaultAggregate). */
@@ -106,6 +123,22 @@ export function useSaveProfile() {
       }),
     onSuccess: (data) => {
       queryClient.setQueryData(['profile'], data)
+    },
+  })
+}
+
+/** Uploads a PDF for AI-assisted Company Profile drafting (EP-13). Never
+ * persists on its own — the caller reviews the returned draft and saves it
+ * via useSaveProfile (PUT /api/profile). */
+export function useIngestProfilePdf() {
+  return useMutation({
+    mutationFn: (file: File) => {
+      const formData = new FormData()
+      formData.append('file', file)
+      return apiFetch<IngestResponse>('/api/profile/ingest', {
+        method: 'POST',
+        body: formData,
+      })
     },
   })
 }

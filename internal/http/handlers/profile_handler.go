@@ -28,6 +28,30 @@ func (h *ProfileHandler) Get(c echo.Context) error {
 	return c.JSON(http.StatusOK, dto.ToProfileResponse(*agg))
 }
 
+// Ingest handles POST /api/profile/ingest — uploads a PDF for AI-assisted
+// Company Profile drafting (EP-13). Stores the file, then best-effort
+// extracts a field Draft via Hermes (Degraded=true, Draft=nil on any AI
+// failure — the upload itself always succeeds independently of AI).
+func (h *ProfileHandler) Ingest(c echo.Context) error {
+	fh, err := c.FormFile("file")
+	if err != nil {
+		return httperr.Write(c, httperr.NewBadRequest("MISSING_FILE", "berkas PDF wajib disertakan (field 'file')"))
+	}
+
+	result, err := h.svc.IngestUpload(c.Request().Context(), fh)
+	if err != nil {
+		return httperr.Write(c, err)
+	}
+
+	return c.JSON(http.StatusOK, dto.IngestResponse{
+		DocRef:   result.DocRef,
+		Filename: result.Filename,
+		Size:     result.Size,
+		Draft:    result.Draft,
+		Degraded: result.Degraded,
+	})
+}
+
 // Update handles PUT /api/profile — always creates a new version.
 func (h *ProfileHandler) Update(c echo.Context) error {
 	var req dto.ProfileUpdateRequest

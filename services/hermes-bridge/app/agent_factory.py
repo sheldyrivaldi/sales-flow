@@ -55,7 +55,14 @@ def build_agent(
             kwargs["base_url"] = "https://openrouter.ai/api/v1"
 
     if mode == "chat":
-        kwargs["enabled_toolsets"] = settings.enabled_toolsets
+        # Active config's enabled_toolsets (EP-18 ST-18.4, AI Provider Config
+        # UI) overrides the ENABLED_TOOLSETS env default when explicitly
+        # set — None means "not configured", so the env default still
+        # applies; an explicit (possibly empty) list always wins.
+        if active and active.get("enabled_toolsets") is not None:
+            kwargs["enabled_toolsets"] = active["enabled_toolsets"]
+        else:
+            kwargs["enabled_toolsets"] = settings.enabled_toolsets
         kwargs["disabled_toolsets"] = ["terminal"]
         kwargs["skip_memory"] = False
     elif mode == "responses":

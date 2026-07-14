@@ -24,6 +24,9 @@ services:
         required: false
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-salespilot}:${POSTGRES_PASSWORD:-salespilot}@postgres:5432/${POSTGRES_DB:-salespilot}?sslmode=disable
+      UPLOAD_DIR: /app/data/uploads
+    volumes:
+      - uploads:/app/data/uploads
     ports:
       - "8080:8080"
     depends_on:
@@ -50,8 +53,19 @@ services:
         required: false
     environment:
       PORT: "8642"
+      # Without this + the volume below, Hermes workspace memory
+      # (MEMORY.md/USER.md + the holographic memory_store.db, both under
+      # get_hermes_home()) lives on the container's ephemeral filesystem and
+      # is wiped on every restart/recreate — silently defeating EP-16's
+      # entire premise ("memory accumulates across sessions"). The container
+      # runs as root (no USER in Dockerfile), so home is /root.
+      HERMES_HOME: /root/.hermes
+    volumes:
+      - hermes-memory:/root/.hermes
     ports:
       - "8642:8642"
 
 volumes:
   pgdata:
+  uploads:
+  hermes-memory:

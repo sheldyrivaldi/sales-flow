@@ -10,16 +10,22 @@ import (
 // index in the DB); each PUT creates a new version and clones the child
 // entities (TargetCriteria, NoGoRule, KeywordSet) so full history is kept.
 type CompanyProfile struct {
-	ID                string    `json:"id"                  gorm:"primaryKey;default:gen_random_uuid()"`
-	CompanyName       string    `json:"company_name"        gorm:"column:company_name;not null"`
-	OneLiner          *string   `json:"one_liner"            gorm:"column:one_liner"`
-	ServiceCategories []string  `json:"service_categories"   gorm:"column:service_categories;serializer:json;type:jsonb"`
-	TechStack         []string  `json:"tech_stack"           gorm:"column:tech_stack;serializer:json;type:jsonb"`
-	SourceDocRefs     []string  `json:"source_doc_refs"      gorm:"column:source_doc_refs;serializer:json;type:jsonb"`
-	Version           int       `json:"version"              gorm:"not null;default:1"`
-	IsCurrent         bool      `json:"is_current"           gorm:"column:is_current;not null;default:true"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                string   `json:"id"                  gorm:"primaryKey;default:gen_random_uuid()"`
+	CompanyName       string   `json:"company_name"        gorm:"column:company_name;not null"`
+	OneLiner          *string  `json:"one_liner"            gorm:"column:one_liner"`
+	ServiceCategories []string `json:"service_categories"   gorm:"column:service_categories;serializer:json;type:jsonb"`
+	TechStack         []string `json:"tech_stack"           gorm:"column:tech_stack;serializer:json;type:jsonb"`
+	SourceDocRefs     []string `json:"source_doc_refs"      gorm:"column:source_doc_refs;serializer:json;type:jsonb"`
+	// CrawlFrequency drives the discovery scheduler (EP-12 ST-12.5.1): one of
+	// "harian" (daily), "2-3x" (2-3x/week), "mingguan" (weekly). CrawlEnabled
+	// defaults to false so a freshly onboarded workspace never auto-crawls
+	// until the user deliberately turns it on (PRD §10 Kartu 5).
+	CrawlFrequency string    `json:"crawl_frequency"      gorm:"column:crawl_frequency;not null;default:'harian'"`
+	CrawlEnabled   bool      `json:"crawl_enabled"        gorm:"column:crawl_enabled;not null;default:false"`
+	Version        int       `json:"version"              gorm:"not null;default:1"`
+	IsCurrent      bool      `json:"is_current"           gorm:"column:is_current;not null;default:true"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 func (CompanyProfile) TableName() string { return "company_profile" }

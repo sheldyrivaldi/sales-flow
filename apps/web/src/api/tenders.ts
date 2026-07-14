@@ -197,6 +197,25 @@ export function usePromoteTender() {
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: ['tenders'] })
       queryClient.invalidateQueries({ queryKey: ['tender', id] })
+      queryClient.invalidateQueries({ queryKey: ['discovery-inbox'] })
+    },
+  })
+}
+
+/** Discovery Inbox "Watchlist" (reason omitted) / "Tolak" (reason filled) —
+ * marks a discovery-origin tender as reviewed without promoting it. */
+export function useReviewTender() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      apiFetch<Tender>(`/api/tenders/${id}/review`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }),
+    onSuccess: (_, { id }) => {
+      queryClient.invalidateQueries({ queryKey: ['tenders'] })
+      queryClient.invalidateQueries({ queryKey: ['tender', id] })
+      queryClient.invalidateQueries({ queryKey: ['discovery-inbox'] })
     },
   })
 }

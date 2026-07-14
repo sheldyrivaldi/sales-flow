@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Brain } from 'lucide-react'
+import { Brain, UploadCloud } from 'lucide-react'
 
 import Tabs, { TabPanel } from '../../components/ui/Tabs'
 import Button from '../../components/ui/Button'
@@ -11,6 +11,7 @@ import NoGoCard from '../../components/profile/NoGoCard'
 import SourcesKeywordCard from '../../components/profile/SourcesKeywordCard'
 import ScoringCard from '../../components/profile/ScoringCard'
 import SourcesTab from '../../components/profile/SourcesTab'
+import ProfilePdfIngest from '../../components/profile/ProfilePdfIngest'
 import type { OtakAgentFormState, OtakAgentFormPatch } from '../../components/profile/types'
 
 import { useProfile, useSaveProfile, isProfileConfigured } from '../../api/profile'
@@ -116,6 +117,7 @@ export default function OtakAgent() {
   const [initialized, setInitialized] = useState(false)
   const [companyNameError, setCompanyNameError] = useState<string | undefined>()
   const [valueMinError, setValueMinError] = useState<string | undefined>()
+  const [showPdfIngest, setShowPdfIngest] = useState(false)
 
   function syncFromProfile(p: Profile) {
     const { editable, preserved } = partitionKeywordSets(p.keywords)
@@ -197,6 +199,31 @@ export default function OtakAgent() {
       ) : (
         <>
           <TabPanel id="profil" className={tab === 'profil' ? 'flex flex-col gap-4' : 'hidden'}>
+            {canEdit && (
+              <div className="flex flex-col gap-2">
+                {!showPdfIngest && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    leftIcon={<UploadCloud className="w-4 h-4" />}
+                    className="self-start"
+                    onClick={() => setShowPdfIngest(true)}
+                  >
+                    Isi dari PDF
+                  </Button>
+                )}
+                {showPdfIngest && (
+                  <ProfilePdfIngest
+                    profile={profile}
+                    onSaved={(updated) => {
+                      syncFromProfile(updated)
+                      setShowPdfIngest(false)
+                    }}
+                  />
+                )}
+              </div>
+            )}
+
             <div className="grid lg:grid-cols-2 gap-4">
               <ProfileCard form={form} onChange={patchForm} disabled={disabled} error={companyNameError} />
               <CapabilitiesCard form={form} onChange={patchForm} disabled={disabled} />

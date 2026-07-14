@@ -1,0 +1,1 @@
+ALTER TABLE tender ADD COLUMN reviewed_at TIMESTAMPTZ;

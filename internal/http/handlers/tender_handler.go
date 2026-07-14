@@ -1,26 +1,37 @@
 package handlers
 
 import (
+	"context"
+	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/labstack/echo/v4"
 
+	"salespilot/internal/auth"
 	"salespilot/internal/domain"
 	"salespilot/internal/http/dto"
 	"salespilot/internal/http/httperr"
 	"salespilot/internal/pagination"
 	"salespilot/internal/service"
+	"salespilot/internal/telemetry"
 )
 
 type TenderHandler struct {
-	svc *service.TenderService
+	svc   *service.TenderService
+	audit domain.AuditRepository
+	emit  *telemetry.Emitter
 }
 
-func NewTenderHandler(svc *service.TenderService) *TenderHandler {
-	return &TenderHandler{svc: svc}
+func NewTenderHandler(svc *service.TenderService, audit domain.AuditRepository) *TenderHandler {
+	return &TenderHandler{svc: svc, audit: audit}
 }
+
+// SetEmitter wires telemetry (EP-17 ST-17.1) after construction — optional,
+// nil-safe.
+func (h *TenderHandler) SetEmitter(e *telemetry.Emitter) { h.emit = e }
 
 // List handles GET /api/tenders
 func (h *TenderHandler) List(c echo.Context) error {
@@ -151,14 +162,85 @@ func (h *TenderHandler) UpdateStatus(c echo.Context) error {
 	return c.JSON(http.StatusOK, dto.ToTenderResponse(*t))
 }
 
-// Promote handles POST /api/tenders/:id/promote
+// Promote handles POST /api/tenders/:id/promote — this is the Discovery
+// Inbox "Pursue" action (EP-12), tracked as the review_pursue metric
+// (EP-17 ST-17.1).
 func (h *TenderHandler) Promote(c echo.Context) error {
 	id := c.Param("id")
 	t, err := h.svc.Promote(c.Request().Context(), id)
 	if err != nil {
 		return httperr.Write(c, err)
 	}
+
+	if h.emit != nil {
+		var actor string
+		if u, ok := auth.UserFromContext(c); ok {
+			actor = u.ID
+		}
+		h.emit.Emit(c.Request().Context(), "review_pursue", map[string]any{"tender_id": t.ID, "actor": actor})
+	}
+
 	return c.JSON(http.StatusOK, dto.ToTenderResponse(*t))
+}
+
+// Review handles POST /api/tenders/:id/review — Discovery Inbox "Watchlist"
+// (reason omitted) / "Tolak" (reason filled) actions (EP-12 ST-12.7): marks a
+// discovery-origin tender as reviewed (removing it from the inbox) without
+// promoting it. The reason, if any, is written to audit_log AND notifies the
+// learning hook (EP-16 TK-16.2.1, inside TenderService.Review) — best-effort,
+// mirrors the writeAudit/writeSourceAudit pattern already used in
+// internal/mcp and internal/ai/discovery.go.
+func (h *TenderHandler) Review(c echo.Context) error {
+	id := c.Param("id")
+
+	var req dto.TenderReviewRequest
+	if err := c.Bind(&req); err != nil {
+		return httperr.Write(c, httperr.NewBadRequest("BIND_ERROR", "request tidak valid"))
+	}
+
+	reason := ""
+	if req.Reason != nil {
+		reason = *req.Reason
+	}
+
+	t, err := h.svc.Review(c.Request().Context(), id, reason)
+	if err != nil {
+		return httperr.Write(c, err)
+	}
+
+	writeDiscoveryReviewAudit(c.Request().Context(), h.audit, t.ID, req.Reason)
+
+	return c.JSON(http.StatusOK, dto.ToTenderResponse(*t))
+}
+
+// writeDiscoveryReviewAudit best-effort records a discovery_review audit_log
+// row. A failure here must not fail the request — the tender's reviewed_at
+// state (the part that actually matters for the inbox) is already committed
+// by the time this runs.
+func writeDiscoveryReviewAudit(ctx context.Context, audit domain.AuditRepository, tenderID string, reason *string) {
+	if audit == nil {
+		return
+	}
+	reasonText := ""
+	if reason != nil {
+		reasonText = *reason
+	}
+	payloadJSON, err := json.Marshal(map[string]any{"reason": reasonText})
+	if err != nil {
+		log.Printf("tender: AUDIT FAILURE: marshal payload untuk discovery_review (tender=%s): %v", tenderID, err)
+		return
+	}
+	targetType := "tender"
+	e := &domain.AuditEvent{
+		Actor:      "user",
+		Action:     "discovery_review",
+		TargetType: &targetType,
+		TargetID:   &tenderID,
+		Payload:    payloadJSON,
+	}
+	if err := audit.Create(ctx, e); err != nil {
+		log.Printf("tender: AUDIT FAILURE: gagal menulis audit_log discovery_review (tender=%s): %v", tenderID, err)
+	}
 }
 
 // RecordOutcome handles POST /api/tenders/:id/outcome

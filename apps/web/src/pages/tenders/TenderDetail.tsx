@@ -11,8 +11,8 @@ import Textarea from '../../components/ui/Textarea'
 import Field from '../../components/ui/Field'
 import EmptyState from '../../components/ui/EmptyState'
 import Skeleton, { SkeletonText } from '../../components/ui/Skeleton'
-import Tooltip from '../../components/ui/Tooltip'
 import AiScorePanel from '../../components/AiScorePanel'
+import PlaybookPanel from '../../components/PlaybookPanel'
 import TenderFormDrawer from './TenderFormDrawer'
 
 import { toast } from '../../lib/toast'
@@ -224,27 +224,14 @@ export default function TenderDetail() {
               Edit
             </Button>
 
-            <Tooltip content="Analisa AI tersedia di EP-10">
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<Sparkles className="w-3.5 h-3.5" />}
-                disabled
-              >
-                Analisa
-              </Button>
-            </Tooltip>
-
-            <Tooltip content="Playbook tersedia di EP-14">
-              <Button
-                variant="secondary"
-                size="sm"
-                leftIcon={<Sparkles className="w-3.5 h-3.5" />}
-                disabled
-              >
-                Playbook
-              </Button>
-            </Tooltip>
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<Sparkles className="w-3.5 h-3.5" />}
+              onClick={() => setActiveTab('playbook')}
+            >
+              Playbook
+            </Button>
 
             {/* Status change */}
             {nextStatuses.length > 0 && (
@@ -288,7 +275,7 @@ export default function TenderDetail() {
           {activeTab === 'ringkasan' && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <TenderSummaryCard tender={tender} />
-              <AiScorePanel tender={tender} />
+              <AiScorePanel targetType="tender" targetId={tender.id} tender={tender} />
             </div>
           )}
         </TabPanel>
@@ -296,18 +283,16 @@ export default function TenderDetail() {
         <TabPanel id="analisa">
           {activeTab === 'analisa' && (
             <div className="max-w-xl">
-              <AiScorePanel tender={tender} />
+              <AiScorePanel targetType="tender" targetId={tender.id} tender={tender} />
             </div>
           )}
         </TabPanel>
 
         <TabPanel id="playbook">
           {activeTab === 'playbook' && (
-            <EmptyState
-              icon={<Sparkles className="w-6 h-6" />}
-              title="Playbook belum tersedia"
-              description="Generator Playbook akan tersedia di EP-14."
-            />
+            <div className="max-w-2xl">
+              <PlaybookPanel targetType="tender" targetId={tender.id} />
+            </div>
           )}
         </TabPanel>
 

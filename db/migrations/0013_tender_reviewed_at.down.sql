@@ -1,0 +1,1 @@
+ALTER TABLE tender DROP COLUMN IF EXISTS reviewed_at;

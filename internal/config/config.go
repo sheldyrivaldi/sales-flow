@@ -18,6 +18,13 @@ type Config struct {
 	SalesMCPToken       string
 	SeedAdminEmail      string
 	SeedAdminPassword   string
+	UploadDir           string
+	// ConfigEncKey encrypts ai_provider_setting.api_key_encrypted (EP-18
+	// ST-18.4, AES-256-GCM — see internal/auth/crypto.go). Optional: the
+	// AI Provider Config feature is simply unavailable without it, the
+	// rest of the app works fine (PRD §8 non-blocking principle extended
+	// to configuration, not just AI output).
+	ConfigEncKey string
 }
 
 // Load reads config from environment (and .env if present). Returns error
@@ -35,6 +42,8 @@ func Load() (*Config, error) {
 		SalesMCPToken:       os.Getenv("SALES_MCP_TOKEN"),
 		SeedAdminEmail:      os.Getenv("SEED_ADMIN_EMAIL"),
 		SeedAdminPassword:   os.Getenv("SEED_ADMIN_PASSWORD"),
+		UploadDir:           getEnv("UPLOAD_DIR", "./data/uploads"),
+		ConfigEncKey:        os.Getenv("CONFIG_ENC_KEY"),
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err

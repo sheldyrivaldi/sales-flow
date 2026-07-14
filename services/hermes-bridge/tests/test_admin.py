@@ -69,6 +69,41 @@ def test_set_config_openrouter_default_base_url():
     assert active["api_key"] == "or-k"
 
 
+def test_set_config_toolsets_round_trip():
+    """enabled_toolsets (EP-18 ST-18.4) round-trips through /admin/config
+    POST → GET, and is passed to set_active_provider."""
+    from app.agent_factory import get_active_provider
+    from app.main import app
+    client = TestClient(app)
+    client.post(
+        "/admin/config",
+        json={"provider": "openai", "model": "gpt-4o", "api_key": "k", "enabled_toolsets": ["web", "docs"]},
+        headers=HEADERS,
+    )
+
+    active = get_active_provider()
+    assert active is not None
+    assert active["enabled_toolsets"] == ["web", "docs"]
+
+    r = client.get("/admin/config", headers=HEADERS)
+    assert r.json()["active"]["enabled_toolsets"] == ["web", "docs"]
+
+
+def test_set_config_no_toolsets_defaults_to_none():
+    from app.agent_factory import get_active_provider
+    from app.main import app
+    client = TestClient(app)
+    client.post(
+        "/admin/config",
+        json={"provider": "openai", "model": "gpt-4o", "api_key": "k"},
+        headers=HEADERS,
+    )
+
+    active = get_active_provider()
+    assert active is not None
+    assert active["enabled_toolsets"] is None
+
+
 def test_agent_uses_active_config():
     """Setelah set config, build_agent mendapat api_key & model dari config aktif."""
     from app.main import app

@@ -3,6 +3,7 @@ package dto
 import (
 	"time"
 
+	"salespilot/internal/ai"
 	"salespilot/internal/domain"
 )
 
@@ -37,9 +38,25 @@ type ProfileUpdateRequest struct {
 	ServiceCategories []string               `json:"service_categories"`
 	TechStack         []string               `json:"tech_stack"`
 	SourceDocRefs     []string               `json:"source_doc_refs"`
+	CrawlFrequency    *string                `json:"crawl_frequency" validate:"omitempty,oneof=harian 2-3x mingguan"`
+	CrawlEnabled      *bool                  `json:"crawl_enabled"`
 	Target            *TargetCriteriaRequest `json:"target"   validate:"omitempty"`
 	NoGo              *NoGoRuleRequest       `json:"nogo"     validate:"omitempty"`
 	Keywords          []KeywordSetRequest    `json:"keywords" validate:"omitempty,dive"`
+}
+
+// --- Ingest (POST /api/profile/ingest — EP-13 PDF Ingest) ---
+
+// IngestResponse is returned by POST /api/profile/ingest. Draft is nil and
+// Degraded is false when the PDF has no text layer or Hermes is unavailable
+// — the upload itself still succeeds (AI extraction is non-blocking), the
+// caller just falls back to manual entry.
+type IngestResponse struct {
+	DocRef   string           `json:"doc_ref"`
+	Filename string           `json:"filename"`
+	Size     int64            `json:"size"`
+	Draft    *ai.ProfileDraft `json:"draft"`
+	Degraded bool             `json:"degraded"`
 }
 
 // --- Response ---
@@ -76,6 +93,8 @@ type ProfileResponse struct {
 	ServiceCategories []string                `json:"service_categories"`
 	TechStack         []string                `json:"tech_stack"`
 	SourceDocRefs     []string                `json:"source_doc_refs"`
+	CrawlFrequency    string                  `json:"crawl_frequency"`
+	CrawlEnabled      bool                    `json:"crawl_enabled"`
 	Version           int                     `json:"version"`
 	IsCurrent         bool                    `json:"is_current"`
 	Target            *TargetCriteriaResponse `json:"target"`
@@ -94,6 +113,8 @@ func ToProfileResponse(agg domain.ProfileAggregate) ProfileResponse {
 		ServiceCategories: orEmpty(agg.Profile.ServiceCategories),
 		TechStack:         orEmpty(agg.Profile.TechStack),
 		SourceDocRefs:     orEmpty(agg.Profile.SourceDocRefs),
+		CrawlFrequency:    agg.Profile.CrawlFrequency,
+		CrawlEnabled:      agg.Profile.CrawlEnabled,
 		Version:           agg.Profile.Version,
 		IsCurrent:         agg.Profile.IsCurrent,
 		CreatedAt:         agg.Profile.CreatedAt,

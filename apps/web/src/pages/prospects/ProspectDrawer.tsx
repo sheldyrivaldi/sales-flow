@@ -11,6 +11,9 @@ import Select from '../../components/ui/Select'
 import EmptyState from '../../components/ui/EmptyState'
 import Skeleton, { SkeletonText } from '../../components/ui/Skeleton'
 import OutcomeNotesModal from '../../components/prospects/OutcomeNotesModal'
+import AiScorePanel from '../../components/AiScorePanel'
+import PlaybookPanel from '../../components/PlaybookPanel'
+import ScoreRing from '../../components/ui/ScoreRing'
 
 import { formatRupiahShort } from '../../lib/format'
 import { toast } from '../../lib/toast'
@@ -25,6 +28,7 @@ import {
 } from '../../api/prospects'
 import type { ProspectStage } from '../../api/prospects'
 import { useUsers } from '../../api/users'
+import { useScore } from '../../api/scores'
 
 export interface ProspectDrawerProps {
   open: boolean
@@ -41,10 +45,11 @@ function SummaryRow({ label, children }: { label: string; children: React.ReactN
   )
 }
 
-/** Detail drawer prospect (Design §4.9): header + Info + Analisa AI (placeholder,
- * diisi EP-10) + Playbook (placeholder, EP-14) + Timeline (placeholder) + aksi cepat. */
+/** Detail drawer prospect (Design §4.9): header + Info + Analisa AI (EP-10)
+ * + Playbook (EP-14) + Timeline (placeholder) + aksi cepat. */
 export default function ProspectDrawer({ open, onClose, prospectId }: ProspectDrawerProps) {
   const { data: prospect, isLoading } = useProspect(prospectId)
+  const { data: score } = useScore('prospect', prospectId)
   const updateStageMutation = useUpdateProspectStage()
   const openAskAI = useAskAIStore((s) => s.openAskAI)
   const { data: usersData } = useUsers()
@@ -110,13 +115,16 @@ export default function ProspectDrawer({ open, onClose, prospectId }: ProspectDr
         <div className="flex flex-col gap-6">
           {/* Header */}
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h2 className="text-h3 font-semibold text-fg truncate">{prospect.name}</h2>
-              {prospect.company && (
-                <p className="text-caption text-fg-muted truncate">{prospect.company}</p>
-              )}
-              <div className="mt-1.5">
-                <StagePill stage={prospect.stage} />
+            <div className="flex items-center gap-3 min-w-0">
+              {score && <ScoreRing score={score.fit_score} size={40} strokeWidth={4} />}
+              <div className="min-w-0">
+                <h2 className="text-h3 font-semibold text-fg truncate">{prospect.name}</h2>
+                {prospect.company && (
+                  <p className="text-caption text-fg-muted truncate">{prospect.company}</p>
+                )}
+                <div className="mt-1.5">
+                  <StagePill stage={prospect.stage} />
+                </div>
               </div>
             </div>
             {prospect.owner_user_id && <Avatar name={ownerName ?? prospect.owner_user_id} size="md" />}
@@ -149,18 +157,18 @@ export default function ProspectDrawer({ open, onClose, prospectId }: ProspectDr
             </SummaryRow>
           </div>
 
-          {/* Analisa AI (placeholder — EP-10) */}
+          {/* Analisa AI */}
           <div>
             <h3 className="text-body font-semibold text-fg mb-2 flex items-center gap-1.5">
               <Sparkles className="w-3.5 h-3.5 text-accent" /> Analisa AI
             </h3>
-            <p className="text-caption text-fg-muted">Terisi setelah Analisa AI (EP-10).</p>
+            <AiScorePanel targetType="prospect" targetId={prospect.id} />
           </div>
 
-          {/* Playbook (placeholder — EP-14) */}
+          {/* Playbook */}
           <div>
             <h3 className="text-body font-semibold text-fg mb-2">Playbook</h3>
-            <p className="text-caption text-fg-muted">Generator Playbook akan tersedia di EP-14.</p>
+            <PlaybookPanel targetType="prospect" targetId={prospect.id} />
           </div>
 
           {/* Timeline (placeholder) */}

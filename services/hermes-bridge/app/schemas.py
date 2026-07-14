@@ -43,3 +43,6 @@ class ProviderConfigRequest(BaseModel):
     model: str
     base_url: str | None = None
     api_key: str
+    # None = don't override (build_agent keeps the ENABLED_TOOLSETS env
+    # default for chat mode); an explicit list (possibly empty) replaces it.
+    enabled_toolsets: list[str] | None = None

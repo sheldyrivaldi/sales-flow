@@ -9,11 +9,11 @@ import Button from '../../components/ui/Button'
 import Field from '../../components/ui/Field'
 import Input from '../../components/ui/Input'
 import ChipInput from '../../components/ui/ChipInput'
-import FileDropzone from '../../components/ui/FileDropzone'
 import Badge from '../../components/ui/Badge'
 import { toast } from '../../lib/toast'
+import ProfilePdfIngest from '../../components/profile/ProfilePdfIngest'
 
-import { useSaveProfile } from '../../api/profile'
+import { useProfile, useSaveProfile } from '../../api/profile'
 import { useKeywordGeneration } from '../../lib/useKeywordGeneration'
 import { useCan } from '../../lib/useCan'
 import { CAPABILITY_PRESETS, DEFAULT_VALUE_MIN } from '../../lib/profilePresets'
@@ -36,6 +36,7 @@ async function triggerFirstDiscovery(): Promise<void> {
 export default function Onboarding() {
   const navigate = useNavigate()
   const canEdit = useCan('EditProfile')
+  const { data: profile } = useProfile()
   const [stepIndex, setStepIndex] = useState(0)
   const [path, setPath] = useState<Path>(null)
 
@@ -56,6 +57,18 @@ export default function Onboarding() {
 
   function skip() {
     navigate('/')
+  }
+
+  // After ProfilePdfIngest itself confirms the save (its own success toast
+  // already fired), still run the same activation follow-through as the
+  // manual path: best-effort discovery kick + redirect to the inbox.
+  async function handlePdfSaved() {
+    try {
+      await triggerFirstDiscovery()
+    } catch {
+      // best-effort — discovery (EP-12) not built yet, never block activation
+    }
+    navigate('/discovery')
   }
 
   async function handleGenerateKeywords() {
@@ -125,20 +138,19 @@ export default function Onboarding() {
           <div className="flex flex-col gap-4">
             <div className="grid sm:grid-cols-2 gap-4">
               <Card className="flex flex-col">
-                <CardBody className="flex flex-col gap-3 items-center text-center flex-1">
-                  <UploadCloud className="w-7 h-7 text-primary" aria-hidden="true" />
-                  <div>
-                    <h2 className="text-body font-semibold text-fg">Cara cepat</h2>
-                    <p className="text-caption text-fg-muted mt-1">
-                      Upload PDF company profile / capability deck → AI isi otomatis
-                    </p>
+                <CardBody className="flex flex-col gap-3 items-center text-center flex-1 justify-between">
+                  <div className="flex flex-col items-center gap-3">
+                    <UploadCloud className="w-7 h-7 text-primary" aria-hidden="true" />
+                    <div>
+                      <h2 className="text-body font-semibold text-fg">Cara cepat</h2>
+                      <p className="text-caption text-fg-muted mt-1">
+                        Upload PDF company profile / capability deck → AI isi otomatis
+                      </p>
+                    </div>
                   </div>
-                  <FileDropzone
-                    disabled
-                    onFiles={() => {}}
-                    className="w-full opacity-60 pointer-events-none"
-                  />
-                  <Badge tone="accent">Segera hadir (EP-13)</Badge>
+                  <Button onClick={() => choosePath('pdf')} className="w-full">
+                    Mulai unggah
+                  </Button>
                 </CardBody>
               </Card>
 
@@ -168,6 +180,30 @@ export default function Onboarding() {
               Lewati, atur nanti
             </button>
           </div>
+        )}
+
+        {stepIndex === 1 && path === 'pdf' && (
+          <Card>
+            <CardBody className="flex flex-col gap-4">
+              <ProfilePdfIngest profile={profile} onSaved={handlePdfSaved} />
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={() => setStepIndex(0)}
+                  className="text-caption text-fg-muted hover:text-fg hover:underline"
+                >
+                  Kembali
+                </button>
+                <button
+                  type="button"
+                  onClick={skip}
+                  className="text-caption text-fg-muted hover:text-fg hover:underline"
+                >
+                  Lewati, atur nanti
+                </button>
+              </div>
+            </CardBody>
+          </Card>
         )}
 
         {stepIndex === 1 && path === 'manual' && (

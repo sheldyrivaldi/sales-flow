@@ -65,6 +65,20 @@ func (r *fakeTenderRepo) Delete(_ context.Context, id string) error {
 	delete(r.items, id)
 	return nil
 }
+func (r *fakeTenderRepo) TopByFitScore(_ context.Context, _ int) ([]domain.Tender, error) {
+	return nil, nil
+}
+func (r *fakeTenderRepo) CountDiscoveryToday(_ context.Context) (int64, error) {
+	return 0, nil
+}
+func (r *fakeTenderRepo) GetByDedupKey(_ context.Context, key string) (*domain.Tender, error) {
+	for _, t := range r.items {
+		if t.DedupKey != nil && *t.DedupKey == key {
+			return &t, nil
+		}
+	}
+	return nil, nil
+}
 
 type fakeEventRepo struct{ items map[string]domain.Event }
 
@@ -228,7 +242,7 @@ func newHarness(t *testing.T) *testHarness {
 		Tender:       service.NewTenderService(tenderRepo, outcomeRepo, service.NoopLearningHook()),
 		Event:        service.NewEventService(eventRepo, prospectRepo),
 		Prospect:     service.NewProspectService(prospectRepo, outcomeRepo, service.NoopLearningHook()),
-		Profile:      service.NewProfileService(profileRepo),
+		Profile:      service.NewProfileService(profileRepo, "", nil),
 		ProspectRepo: prospectRepo,
 		Audit:        auditRepo,
 		Playbook:     playbookRepo,

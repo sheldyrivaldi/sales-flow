@@ -4,21 +4,33 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
+	"salespilot/internal/domain"
 	"salespilot/internal/hermes"
+	"salespilot/internal/telemetry"
 )
 
 // stubHermesClient is a minimal hermes.Client stub for unit testing
-// KeywordService without a real Hermes bridge. Only GenerateJSON is
-// meaningful; the rest satisfy the interface.
+// KeywordService/ReportService without a real Hermes bridge. generateJSON is
+// meaningful for JSON-schema callers (ScoreService/PlaybookService/
+// KeywordService); chat is meaningful for ReportService (Chat, not
+// GenerateJSON, per ai.ReportGenerator). Either may be left nil if unused by
+// a given test.
 type stubHermesClient struct {
 	generateJSON func(ctx context.Context, prompt string, schema any, sk hermes.SessionKey) (json.RawMessage, error)
+	chat         func(ctx context.Context, req hermes.ChatRequest) (hermes.ChatResponse, error)
+	configure    func(ctx context.Context, cfg hermes.ProviderConfig) error
 }
 
 var _ hermes.Client = (*stubHermesClient)(nil)
 
-func (s *stubHermesClient) Chat(_ context.Context, _ hermes.ChatRequest) (hermes.ChatResponse, error) {
+func (s *stubHermesClient) Chat(ctx context.Context, req hermes.ChatRequest) (hermes.ChatResponse, error) {
+	if s.chat != nil {
+		return s.chat(ctx, req)
+	}
 	return hermes.ChatResponse{}, errors.New("not implemented")
 }
 
@@ -34,8 +46,77 @@ func (s *stubHermesClient) Health(_ context.Context) (hermes.Capabilities, error
 	return hermes.Capabilities{}, errors.New("not implemented")
 }
 
-func (s *stubHermesClient) Configure(_ context.Context, _ hermes.ProviderConfig) error {
+func (s *stubHermesClient) Configure(ctx context.Context, cfg hermes.ProviderConfig) error {
+	if s.configure != nil {
+		return s.configure(ctx, cfg)
+	}
 	return errors.New("not implemented")
+}
+
+func (s *stubHermesClient) ResetMemory(_ context.Context, _ hermes.SessionKey) error {
+	return errors.New("not implemented")
+}
+
+// fakeTelemetryRepo is a shared in-memory domain.TelemetryRepository for
+// tests verifying telemetry.Emitter.Emit is actually invoked (EP-17
+// ST-17.1 TK-17.1.2). Emit is async, so tests must poll (see waitForEvents)
+// rather than assert immediately after the call that triggers it.
+type fakeTelemetryRepo struct {
+	mu     sync.Mutex
+	events []*domain.TelemetryEvent
+}
+
+func (f *fakeTelemetryRepo) Create(_ context.Context, e *domain.TelemetryEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, e)
+	return nil
+}
+
+func (f *fakeTelemetryRepo) CountByEvent(_ context.Context, event string, since time.Time) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n int64
+	for _, e := range f.events {
+		if e.Event == event {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeTelemetryRepo) snapshot() []*domain.TelemetryEvent {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]*domain.TelemetryEvent, len(f.events))
+	copy(out, f.events)
+	return out
+}
+
+// waitForEvents polls until n events named event have been recorded, or
+// fails the test after a short timeout — needed because Emit fires in its
+// own goroutine.
+func waitForEvents(t *testing.T, repo *fakeTelemetryRepo, event string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		count := 0
+		for _, e := range repo.snapshot() {
+			if e.Event == event {
+				count++
+			}
+		}
+		if count >= n {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("timeout menunggu %d event %q", n, event)
+}
+
+func newTestEmitter() (*telemetry.Emitter, *fakeTelemetryRepo) {
+	repo := &fakeTelemetryRepo{}
+	return telemetry.NewEmitter(repo), repo
 }
 
 func TestKeywordService_Generate_Success(t *testing.T) {

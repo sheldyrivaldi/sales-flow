@@ -73,3 +73,32 @@ def test_build_agent_active_provider_override():
     assert agent._kwargs["model"] == "gpt-4o"
     assert agent._kwargs["api_key"] == "or-key"
     assert agent._kwargs["base_url"] == "https://openrouter.ai/api/v1"
+
+
+def test_build_agent_active_provider_toolsets_override():
+    """enabled_toolsets from AI Provider Config (EP-18 ST-18.4) overrides the
+    ENABLED_TOOLSETS env default when explicitly set on the active config."""
+    FakeAIAgent = _make_mock_agent_class()
+    with patch("app.agent_factory.AIAgent", FakeAIAgent):
+        from app import agent_factory
+        agent_factory.set_active_provider(
+            {"provider": "openai", "model": "gpt-4o", "api_key": "k", "enabled_toolsets": ["docs"]}
+        )
+        agent = agent_factory.build_agent(mode="chat")
+        agent_factory.set_active_provider(None)
+
+    assert agent._kwargs["enabled_toolsets"] == ["docs"]
+
+
+def test_build_agent_active_provider_no_toolsets_keeps_env_default():
+    """enabled_toolsets absent/None on the active config (e.g. a config saved
+    before this field existed, or one the admin never set) falls back to the
+    env default rather than being treated as an explicit empty override."""
+    FakeAIAgent = _make_mock_agent_class()
+    with patch("app.agent_factory.AIAgent", FakeAIAgent):
+        from app import agent_factory
+        agent_factory.set_active_provider({"provider": "openai", "model": "gpt-4o", "api_key": "k"})
+        agent = agent_factory.build_agent(mode="chat")
+        agent_factory.set_active_provider(None)
+
+    assert "web" in agent._kwargs["enabled_toolsets"]

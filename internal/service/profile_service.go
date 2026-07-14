@@ -4,12 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"mime/multipart"
 
 	"gorm.io/gorm"
 
+	"salespilot/internal/ai"
 	"salespilot/internal/domain"
 	"salespilot/internal/http/dto"
+	"salespilot/internal/http/httperr"
+	"salespilot/internal/storage"
 )
+
+// maxUploadBytes caps Company Profile PDF ingest uploads (EP-13 ST-13.1) at
+// 10 MB — generous for a text-based capability deck / company profile PDF
+// without letting a request hold an unbounded amount of memory (SavePDF
+// reads the whole body to validate the PDF magic bytes before writing).
+const maxUploadBytes = 10 * 1024 * 1024
 
 // Defaults applied to a brand-new profile (PRD §10 / ST-08.2 AC): value_min
 // Rp 1.000.000.000 (Rp 1 miliar), deadline_min_days 7, countries=[Indonesia],
@@ -25,11 +36,13 @@ func defaultProcurementTypes() []string {
 
 // ProfileService handles read/write of the versioned CompanyProfile aggregate.
 type ProfileService struct {
-	repo domain.ProfileRepository
+	repo      domain.ProfileRepository
+	uploadDir string
+	extractor *ai.Extractor // nil-able: PDF ingest still stores the file (degraded=true) without AI extraction
 }
 
-func NewProfileService(repo domain.ProfileRepository) *ProfileService {
-	return &ProfileService{repo: repo}
+func NewProfileService(repo domain.ProfileRepository, uploadDir string, extractor *ai.Extractor) *ProfileService {
+	return &ProfileService{repo: repo, uploadDir: uploadDir, extractor: extractor}
 }
 
 // defaultAggregate builds the template used both for a never-configured
@@ -42,6 +55,8 @@ func defaultAggregate(companyName string) *domain.ProfileAggregate {
 			ServiceCategories: []string{},
 			TechStack:         []string{},
 			SourceDocRefs:     []string{},
+			CrawlFrequency:    "harian",
+			CrawlEnabled:      false,
 			Version:           0,
 			IsCurrent:         false,
 		},
@@ -75,6 +90,76 @@ func (s *ProfileService) GetCurrent(ctx context.Context) (*domain.ProfileAggrega
 	return agg, nil
 }
 
+// IngestResult is returned by IngestUpload. Draft is nil whenever AI
+// extraction didn't happen or didn't succeed (Degraded=true in that case) —
+// the upload itself has still succeeded (the file is stored, DocRef is
+// valid) so the caller can always fall back to manual entry.
+type IngestResult struct {
+	DocRef   string
+	Filename string
+	Size     int64
+	Draft    *ai.ProfileDraft
+	Degraded bool
+}
+
+// IngestUpload validates and stores an uploaded PDF for Company Profile
+// ingest (EP-13 ST-13.1/13.2), then best-effort extracts text + drafts
+// profile fields via Hermes. AI extraction failures (no text layer, Hermes
+// down/invalid JSON) never fail the request — they only set Degraded=true
+// with Draft=nil, since the whole point of AI ingest is optional convenience
+// on top of an upload that must always succeed on its own (PRD §8: "gagal AI
+// → pesan ramah, data utuh").
+func (s *ProfileService) IngestUpload(ctx context.Context, fh *multipart.FileHeader) (*IngestResult, error) {
+	f, err := fh.Open()
+	if err != nil {
+		return nil, fmt.Errorf("profile.IngestUpload: open: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	docRef, size, err := storage.SavePDF(s.uploadDir, f, maxUploadBytes)
+	if err != nil {
+		switch {
+		case errors.Is(err, storage.ErrInvalidPDF):
+			return nil, httperr.NewBadRequest("INVALID_FILE_TYPE", "berkas harus PDF yang valid")
+		case errors.Is(err, storage.ErrFileTooLarge):
+			return nil, httperr.NewBadRequest("FILE_TOO_LARGE", fmt.Sprintf("berkas melebihi batas ukuran %d MB", maxUploadBytes/(1024*1024)))
+		default:
+			return nil, fmt.Errorf("profile.IngestUpload: %w", err)
+		}
+	}
+
+	result := &IngestResult{DocRef: docRef, Filename: fh.Filename, Size: size}
+
+	if s.extractor == nil {
+		result.Degraded = true
+		return result, nil
+	}
+
+	path, err := storage.FullPath(s.uploadDir, docRef)
+	if err != nil {
+		log.Printf("profile: IngestUpload: FullPath gagal untuk doc_ref %q: %v", docRef, err)
+		result.Degraded = true
+		return result, nil
+	}
+
+	text, err := ai.ExtractText(path)
+	if err != nil {
+		log.Printf("profile: IngestUpload: ekstraksi teks gagal (doc_ref=%s): %v", docRef, err)
+		result.Degraded = true
+		return result, nil
+	}
+
+	draft, err := s.extractor.Extract(ctx, text)
+	if err != nil {
+		log.Printf("profile: IngestUpload: ekstraksi field AI gagal (doc_ref=%s): %v", docRef, err)
+		result.Degraded = true
+		return result, nil
+	}
+
+	result.Draft = draft
+	return result, nil
+}
+
 // Save merges req over the current version (falling back to defaults when no
 // version exists yet) and persists the result as a brand-new version.
 func (s *ProfileService) Save(ctx context.Context, req *dto.ProfileUpdateRequest) (*domain.ProfileAggregate, error) {
@@ -93,6 +178,8 @@ func (s *ProfileService) Save(ctx context.Context, req *dto.ProfileUpdateRequest
 			ServiceCategories: coalesce(req.ServiceCategories, base.Profile.ServiceCategories),
 			TechStack:         coalesce(req.TechStack, base.Profile.TechStack),
 			SourceDocRefs:     coalesce(req.SourceDocRefs, base.Profile.SourceDocRefs),
+			CrawlFrequency:    coalesceCrawlFrequency(req.CrawlFrequency, base.Profile.CrawlFrequency),
+			CrawlEnabled:      coalesceBool(req.CrawlEnabled, base.Profile.CrawlEnabled),
 		},
 	}
 
@@ -198,6 +285,20 @@ func coalesceFloat(primary, fallback *float64) *float64 {
 func coalesceInt(primary, fallback *int) *int {
 	if primary != nil {
 		return primary
+	}
+	return fallback
+}
+
+func coalesceCrawlFrequency(primary *string, fallback string) string {
+	if primary != nil {
+		return *primary
+	}
+	return fallback
+}
+
+func coalesceBool(primary *bool, fallback bool) bool {
+	if primary != nil {
+		return *primary
 	}
 	return fallback
 }

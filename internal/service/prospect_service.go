@@ -11,6 +11,7 @@ import (
 	"salespilot/internal/http/dto"
 	"salespilot/internal/http/httperr"
 	"salespilot/internal/pagination"
+	"salespilot/internal/telemetry"
 )
 
 // ProspectService handles business logic for the prospect entity.
@@ -18,11 +19,17 @@ type ProspectService struct {
 	repo     domain.ProspectRepository
 	outcomes domain.OutcomeRepository
 	learn    LearningHook
+	emit     *telemetry.Emitter
 }
 
 func NewProspectService(repo domain.ProspectRepository, outcomes domain.OutcomeRepository, learn LearningHook) *ProspectService {
 	return &ProspectService{repo: repo, outcomes: outcomes, learn: learn}
 }
+
+// SetEmitter wires telemetry (EP-17 ST-17.1) after construction — optional,
+// nil-safe, kept out of the constructor so existing call sites/tests are
+// unaffected by observability being wired in or not.
+func (s *ProspectService) SetEmitter(e *telemetry.Emitter) { s.emit = e }
 
 // Create creates a new prospect from a create request.
 func (s *ProspectService) Create(ctx context.Context, req *dto.ProspectCreateRequest, defaultOwnerUserID string) (*domain.Prospect, error) {
@@ -158,7 +165,7 @@ func (s *ProspectService) applyStage(ctx context.Context, p *domain.Prospect, to
 		if to == domain.ProspectStageWon {
 			result = domain.OutcomeWon
 		}
-		if _, err := recordOutcome(ctx, s.outcomes, s.learn, domain.OutcomeTargetProspect, p.ID, result, notes); err != nil {
+		if _, err := recordOutcome(ctx, s.outcomes, s.learn, s.emit, domain.OutcomeTargetProspect, p.ID, result, notes); err != nil {
 			return fmt.Errorf("prospect.applyStage: %w", err)
 		}
 	}

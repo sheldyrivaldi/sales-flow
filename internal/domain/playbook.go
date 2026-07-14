@@ -44,3 +44,31 @@ type PlaybookDraftRepository interface {
 	Create(ctx context.Context, d *PlaybookDraft) error
 	List(ctx context.Context, targetType, targetID string) ([]PlaybookDraft, error)
 }
+
+// Playbook is one immutable, versioned playbook (EP-14) generated for a
+// tender or prospect. Generating a new playbook always creates
+// version = latest+1 — existing rows are never updated or deleted, so the
+// full history stays browsable/comparable (PRD AC: "versi baru, lama tetap").
+type Playbook struct {
+	ID         string          `json:"id"          gorm:"primaryKey;default:gen_random_uuid()"`
+	TargetType string          `json:"target_type" gorm:"column:target_type;not null"`
+	TargetID   string          `json:"target_id"   gorm:"column:target_id;not null"`
+	Version    int             `json:"version"     gorm:"not null"`
+	Content    json.RawMessage `json:"content"      gorm:"type:jsonb;not null"`
+	Model      *string         `json:"model"`
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
+}
+
+func (Playbook) TableName() string { return "playbook" }
+
+// PlaybookRepository persists immutable versioned playbooks — Create-only,
+// no Update/Delete method exists because none should ever be needed.
+type PlaybookRepository interface {
+	Create(ctx context.Context, p *Playbook) error
+	GetByID(ctx context.Context, id string) (*Playbook, error)
+	ListByTarget(ctx context.Context, targetType, targetID string) ([]Playbook, error)
+	// GetLatestVersion returns the highest existing version for a target, or
+	// 0 if none exists yet (so the caller's next version is 0+1 = 1).
+	GetLatestVersion(ctx context.Context, targetType, targetID string) (int, error)
+}

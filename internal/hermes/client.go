@@ -59,6 +59,10 @@ type ProviderConfig struct {
 	Model    string  `json:"model"`
 	BaseURL  *string `json:"base_url"` // null bila memakai default provider
 	APIKey   string  `json:"api_key"`
+	// ToolSets menimpa default enabled_toolsets bridge (env ENABLED_TOOLSETS)
+	// untuk mode chat. omitempty: slice kosong/nil sengaja tidak dikirim agar
+	// bridge tetap memakai default-nya, bukan "toolset kosong".
+	ToolSets []string `json:"enabled_toolsets,omitempty"`
 }
 
 // Client adalah kontrak abstrak ke Hermes — satu-satunya antarmuka yang boleh dipakai
@@ -69,4 +73,7 @@ type Client interface {
 	GenerateJSON(ctx context.Context, prompt string, schema any, sk SessionKey) (json.RawMessage, error)
 	Health(ctx context.Context) (Capabilities, error)
 	Configure(ctx context.Context, cfg ProviderConfig) error
+	// ResetMemory clears Hermes workspace memory for sk (EP-16 TK-16.3.1,
+	// admin-only). Additive to the interface — mirrors Configure's shape.
+	ResetMemory(ctx context.Context, sk SessionKey) error
 }

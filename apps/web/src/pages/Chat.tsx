@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, Plus } from 'lucide-react'
+import { Search, Plus, Sparkles } from 'lucide-react'
 import { useConversations, useConversation, useCreateConversation } from '../api/chat'
 import { useChatStream, useChatDegradeStore } from '../store/chat'
 import { formatRelative } from '../lib/format'
@@ -132,6 +132,10 @@ export default function Chat() {
                 title="Tanya Agen AI"
                 description="Pilih percakapan atau mulai yang baru"
               />
+              <p className="text-caption text-fg-muted flex items-center gap-1">
+                <Sparkles className="w-3.5 h-3.5 text-accent" />
+                Asisten belajar dari aktivitas & hasil kamu.
+              </p>
             </div>
           ) : loadingDetail ? (
             <div className="space-y-3">

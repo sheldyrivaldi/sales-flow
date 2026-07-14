@@ -20,17 +20,23 @@ import (
 	"salespilot/internal/http/httperr"
 	"salespilot/internal/pagination"
 	"salespilot/internal/service"
+	"salespilot/internal/telemetry"
 )
 
 type ChatHandler struct {
 	svc    *service.ChatService
 	hermes hermes.Client
 	cfg    *config.Config
+	emit   *telemetry.Emitter
 }
 
 func NewChatHandler(svc *service.ChatService, hc hermes.Client, cfg *config.Config) *ChatHandler {
 	return &ChatHandler{svc: svc, hermes: hc, cfg: cfg}
 }
+
+// SetEmitter wires telemetry (EP-17 ST-17.1) after construction — optional,
+// nil-safe.
+func (h *ChatHandler) SetEmitter(e *telemetry.Emitter) { h.emit = e }
 
 // Create handles POST /api/conversations
 func (h *ChatHandler) Create(c echo.Context) error {
@@ -59,6 +65,10 @@ func (h *ChatHandler) Create(c echo.Context) error {
 	conv, err := h.svc.CreateConversation(c.Request().Context(), user.ID, title, firstMsg)
 	if err != nil {
 		return httperr.Write(c, err)
+	}
+
+	if h.emit != nil {
+		h.emit.Emit(c.Request().Context(), "chat_opened", map[string]any{"actor": user.ID})
 	}
 
 	return c.JSON(http.StatusCreated, dto.ToConversationResponse(*conv))

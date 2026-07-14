@@ -1,3 +1,4 @@
+import { Sparkles } from 'lucide-react'
 import Modal from '../ui/Modal'
 import Field from '../ui/Field'
 import Textarea from '../ui/Textarea'
@@ -52,6 +53,10 @@ export default function OutcomeNotesModal({
           placeholder="Alasan, pembelajaran, atau catatan tambahan…"
         />
       </Field>
+      <p className="mt-2 text-caption text-fg-muted flex items-center gap-1">
+        <Sparkles className="w-3.5 h-3.5 text-accent" />
+        Asisten belajar dari aktivitas & hasil kamu.
+      </p>
     </Modal>
   )
 }
