@@ -1,13 +1,14 @@
 import { useMemo, useState } from 'react'
-import { LayoutGrid, List as ListIcon, Plus } from 'lucide-react'
+import { FileSpreadsheet, LayoutGrid, List as ListIcon, Plus, Search, X } from 'lucide-react'
 import {
   DndContext,
+  DragOverlay,
   PointerSensor,
   useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core'
-import type { DragEndEvent } from '@dnd-kit/core'
+import type { DragEndEvent, DragStartEvent } from '@dnd-kit/core'
 
 import { StagePill } from '../../components/ui/Badge'
 import Badge from '../../components/ui/Badge'
@@ -18,16 +19,16 @@ import Field from '../../components/ui/Field'
 import Button from '../../components/ui/Button'
 import Select from '../../components/ui/Select'
 import Input from '../../components/ui/Input'
-import Tooltip from '../../components/ui/Tooltip'
 import Avatar from '../../components/ui/Avatar'
 import Table from '../../components/ui/Table'
 import type { Column } from '../../components/ui/Table'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
-import ProspectCard from '../../components/prospects/ProspectCard'
+import ProspectCard, { ProspectCardView } from '../../components/prospects/ProspectCard'
 import OutcomeNotesModal from '../../components/prospects/OutcomeNotesModal'
 import ProspectFormDrawer from './ProspectFormDrawer'
 import ProspectDrawer from './ProspectDrawer'
 import { formatRupiahShort } from '../../lib/format'
+import { exportPipelineExcel } from '../../lib/exportPipelineExcel'
 import { toast } from '../../lib/toast'
 import { cn } from '../../lib/cn'
 
@@ -54,29 +55,34 @@ interface StageColumnProps {
   onCardClick: (id: string) => void
 }
 
+/** Kolom board ala Jira: panel abu lembut setinggi board, header tetap di
+ * atas (stage + jumlah + total nilai), daftar kartu scroll sendiri per kolom,
+ * dan seluruh kolom menyala saat kartu diseret di atasnya. */
 function StageColumn({ stage, cards, ownerNames, onCardClick }: StageColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id: stage })
   const totalValue = cards.reduce((sum, p) => sum + (p.est_value ?? 0), 0)
 
   return (
-    <div className="w-64 flex-shrink-0 flex flex-col gap-3">
-      <div className="flex flex-col gap-1 px-1">
-        <div className="flex items-center justify-between">
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'w-72 flex-shrink-0 flex flex-col rounded-card border bg-surface-subtle/70 transition-all duration-150 min-h-0',
+        isOver ? 'border-primary bg-primary-subtle ring-2 ring-primary/25' : 'border-line'
+      )}
+    >
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-line/70 shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
           <StagePill stage={stage} />
-          <span className="text-caption text-fg-muted">{cards.length}</span>
+          <span className="inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-pill bg-surface text-caption font-semibold text-fg-muted tabular-nums">
+            {cards.length}
+          </span>
         </div>
-        <span className="text-caption font-semibold text-fg tabular-nums">
+        <span className="text-caption font-semibold text-fg-muted tabular-nums truncate">
           {formatRupiahShort(totalValue)}
         </span>
       </div>
 
-      <div
-        ref={setNodeRef}
-        className={cn(
-          'flex flex-col gap-2 min-h-[6rem] rounded-card p-1 transition-colors',
-          isOver && 'bg-primary/5 ring-2 ring-primary/30'
-        )}
-      >
+      <div className="flex-1 min-h-24 overflow-y-auto scrollbar-thin p-2 flex flex-col gap-2">
         {cards.map((p) => (
           <ProspectCard
             key={p.id}
@@ -85,6 +91,11 @@ function StageColumn({ stage, cards, ownerNames, onCardClick }: StageColumnProps
             onClick={() => onCardClick(p.id)}
           />
         ))}
+        {cards.length === 0 && (
+          <div className="flex items-center justify-center rounded-btn border border-dashed border-line-strong/60 py-6 text-caption text-fg-subtle select-none">
+            Seret kartu ke sini
+          </div>
+        )}
       </div>
     </div>
   )
@@ -94,11 +105,18 @@ export default function ProspectBoard() {
   const [view, setView] = useState<'board' | 'table'>('board')
   const [sourceFilter, setSourceFilter] = useState<ProspectSource | ''>('')
   const [ownerFilter, setOwnerFilter] = useState('')
+  const [searchText, setSearchText] = useState('')
+  const [stageFilter, setStageFilter] = useState<ProspectStage[]>([])
+  const [minValue, setMinValue] = useState('')
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [editingProspect, setEditingProspect] = useState<Prospect | undefined>()
   const [deleteTarget, setDeleteTarget] = useState<Prospect | null>(null)
+
+  // Kartu yang sedang diseret — dirender sebagai clone di <DragOverlay>
+  // (behavior board ala Jira: kartu asal meredup, clone mengikuti kursor).
+  const [activeProspect, setActiveProspect] = useState<Prospect | null>(null)
 
   // Drag-to-WON/LOST & kebab "Ubah Stage" berbagi modal catatan opsional yang sama.
   const [pendingMove, setPendingMove] = useState<{ id: string; stage: ProspectStage } | null>(null)
@@ -132,7 +150,38 @@ export default function ProspectBoard() {
     () => Array.from(new Set(allItems.map((p) => p.owner_user_id).filter((v): v is string => !!v))),
     [allItems]
   )
-  const items = ownerFilter ? allItems.filter((p) => p.owner_user_id === ownerFilter) : allItems
+  // Filter gabungan ala Jira: semua kriteria di-AND-kan; tiap filter berdiri
+  // sendiri dan bisa dikombinasikan bebas.
+  const minValueNum = parseFloat(minValue)
+  const searchLower = searchText.trim().toLowerCase()
+  const items = allItems.filter((p) => {
+    if (ownerFilter && p.owner_user_id !== ownerFilter) return false
+    if (stageFilter.length > 0 && !stageFilter.includes(p.stage)) return false
+    if (!isNaN(minValueNum) && minValue !== '' && (p.est_value ?? 0) < minValueNum) return false
+    if (searchLower) {
+      const hay = `${p.name} ${p.company ?? ''} ${p.contact_info ?? ''}`.toLowerCase()
+      if (!hay.includes(searchLower)) return false
+    }
+    return true
+  })
+
+  const activeFilterCount =
+    (searchLower ? 1 : 0) + (sourceFilter ? 1 : 0) + (ownerFilter ? 1 : 0) +
+    (stageFilter.length > 0 ? 1 : 0) + (minValue !== '' && !isNaN(minValueNum) ? 1 : 0)
+
+  function resetFilters() {
+    setSearchText('')
+    setSourceFilter('')
+    setOwnerFilter('')
+    setStageFilter([])
+    setMinValue('')
+  }
+
+  function toggleStage(stage: ProspectStage) {
+    setStageFilter((prev) =>
+      prev.includes(stage) ? prev.filter((x) => x !== stage) : [...prev, stage],
+    )
+  }
 
   const byStage: Record<ProspectStage, Prospect[]> = {
     NEW: [],
@@ -195,7 +244,12 @@ export default function ProspectBoard() {
     }
   }
 
+  function handleDragStart(event: DragStartEvent) {
+    setActiveProspect(items.find((p) => p.id === String(event.active.id)) ?? null)
+  }
+
   function handleDragEnd(event: DragEndEvent) {
+    setActiveProspect(null)
     const { active, over } = event
     if (!over) return
 
@@ -211,6 +265,12 @@ export default function ProspectBoard() {
     }
 
     updateStageMutation.mutate({ id: prospectId, stage: targetStage })
+  }
+
+  function handleExportExcel() {
+    void exportPipelineExcel(items, ownerNames)
+      .then(() => toast.success('Pipeline berhasil diekspor ke Excel.'))
+      .catch(() => toast.error('Gagal mengekspor pipeline.'))
   }
 
   async function confirmPendingMove() {
@@ -288,9 +348,9 @@ export default function ProspectBoard() {
   ]
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-h2 font-semibold text-fg">Prospects</h1>
+    <div className="flex flex-col gap-4 h-full min-h-0">
+      <div className="flex items-center justify-between shrink-0">
+        <h1 className="text-h2 font-semibold text-fg">Pipeline</h1>
         <div className="flex items-center gap-2">
           {/* Toggle Board / Table */}
           <div className="inline-flex rounded-btn border border-line overflow-hidden">
@@ -315,8 +375,16 @@ export default function ProspectBoard() {
               <ListIcon className="w-3.5 h-3.5" /> Table
             </button>
           </div>
+          <Button
+            variant="secondary"
+            leftIcon={<FileSpreadsheet className="w-4 h-4" />}
+            onClick={handleExportExcel}
+            disabled={items.length === 0}
+          >
+            Export Excel
+          </Button>
           <Button leftIcon={<Plus className="w-4 h-4" />} onClick={openCreate}>
-            + Prospek Baru
+            Prospek Baru
           </Button>
         </div>
       </div>
@@ -327,39 +395,90 @@ export default function ProspectBoard() {
         </p>
       )}
 
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-3">
-        <Select
-          className="w-40"
-          value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value as ProspectSource | '')}
-        >
-          <option value="">Semua Sumber</option>
-          {(Object.keys(SOURCE_LABELS) as ProspectSource[]).map((s) => (
-            <option key={s} value={s}>
-              {SOURCE_LABELS[s]}
-            </option>
-          ))}
-        </Select>
+      {/* Filter bar ala Jira: search + multi-stage + sumber + owner + min nilai,
+          semua bisa dikombinasikan; chip stage toggle + tombol reset. */}
+      <div className="flex flex-col gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-fg-subtle pointer-events-none" aria-hidden="true" />
+            <Input
+              className="w-56 pl-8"
+              placeholder="Cari nama, perusahaan, kontak…"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              aria-label="Cari prospek"
+            />
+          </div>
 
-        <Select className="w-44" value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}>
-          <option value="">Semua Owner</option>
-          {ownerOptions.map((o) => (
-            <option key={o} value={o}>
-              {ownerNames[o] ?? o}
-            </option>
-          ))}
-        </Select>
+          <Select
+            className="w-40"
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value as ProspectSource | '')}
+          >
+            <option value="">Semua Sumber</option>
+            {(Object.keys(SOURCE_LABELS) as ProspectSource[]).map((s) => (
+              <option key={s} value={s}>
+                {SOURCE_LABELS[s]}
+              </option>
+            ))}
+          </Select>
 
-        <Tooltip content="Aktif setelah EP-10 (skor prospek)">
-          <Input className="w-36" placeholder="Min skor" disabled />
-        </Tooltip>
+          <Select className="w-44" value={ownerFilter} onChange={(e) => setOwnerFilter(e.target.value)}>
+            <option value="">Semua Owner</option>
+            {ownerOptions.map((o) => (
+              <option key={o} value={o}>
+                {ownerNames[o] ?? o}
+              </option>
+            ))}
+          </Select>
+
+          <Input
+            className="w-40"
+            type="number"
+            min="0"
+            placeholder="Min nilai (Rp)"
+            value={minValue}
+            onChange={(e) => setMinValue(e.target.value)}
+            aria-label="Nilai minimum"
+          />
+
+          {activeFilterCount > 0 && (
+            <Button size="sm" variant="ghost" leftIcon={<X className="w-3.5 h-3.5" />} onClick={resetFilters}>
+              Reset ({activeFilterCount})
+            </Button>
+          )}
+        </div>
+
+        {/* Chip stage multi-select */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-caption text-fg-muted mr-1">Stage:</span>
+          {PROSPECT_STAGES.map((stage) => {
+            const active = stageFilter.includes(stage)
+            return (
+              <button
+                key={stage}
+                type="button"
+                aria-pressed={active}
+                onClick={() => toggleStage(stage)}
+                className={cn(
+                  'px-2.5 py-1 rounded-pill text-caption font-medium border transition-colors duration-150',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
+                  active
+                    ? 'bg-primary-subtle text-primary-active border-primary-border'
+                    : 'bg-surface text-fg-muted border-line hover:border-primary-border hover:text-fg',
+                )}
+              >
+                {stage}
+              </button>
+            )
+          })}
+        </div>
       </div>
 
       {isLoading ? (
-        <div className="flex gap-4 overflow-x-auto pb-2">
+        <div className="flex gap-3 overflow-x-auto scrollbar-thin pb-2">
           {PROSPECT_STAGES.map((stage) => (
-            <div key={stage} className="w-64 flex-shrink-0 flex flex-col gap-3">
+            <div key={stage} className="w-72 flex-shrink-0 flex flex-col gap-3">
               <Skeleton className="h-10" />
               <Skeleton className="h-24" />
               <Skeleton className="h-24" />
@@ -372,13 +491,20 @@ export default function ProspectBoard() {
           description="Buat prospek baru atau konversi dari event/tender untuk mulai mengelola pipeline."
           action={
             <Button size="sm" onClick={openCreate}>
-              + Prospek Baru
+              Prospek Baru
             </Button>
           }
         />
       ) : view === 'board' ? (
-        <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-          <div className="flex gap-4 overflow-x-auto pb-2">
+        <DndContext
+          sensors={sensors}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => setActiveProspect(null)}
+        >
+          {/* Board mengisi sisa tinggi halaman; kolom setinggi board dan
+              scroll kartunya sendiri-sendiri — persis behavior papan Jira. */}
+          <div className="flex-1 min-h-0 flex gap-3 overflow-x-auto scrollbar-thin pb-2 items-stretch">
             {PROSPECT_STAGES.map((stage) => (
               <StageColumn
                 key={stage}
@@ -389,6 +515,18 @@ export default function ProspectBoard() {
               />
             ))}
           </div>
+
+          {/* Clone kartu yang mengikuti kursor saat drag — sedikit miring +
+              bayangan tebal supaya terasa "terangkat" dari papan. */}
+          <DragOverlay dropAnimation={{ duration: 180, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }}>
+            {activeProspect ? (
+              <ProspectCardView
+                prospect={activeProspect}
+                ownerName={activeProspect.owner_user_id ? ownerNames[activeProspect.owner_user_id] : undefined}
+                className="rotate-2 shadow-lg cursor-grabbing ring-1 ring-primary-border"
+              />
+            ) : null}
+          </DragOverlay>
         </DndContext>
       ) : (
         <div className="bg-surface border border-line rounded-card overflow-hidden">

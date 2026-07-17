@@ -2,6 +2,17 @@
 
 SalesPilot is a three-service stack: a React web frontend, a Go API backend, and a Python AI bridge service.
 
+## Target architecture: Hermes as AI engine, Web App as orchestrator
+
+Hermes Agent is **not** being replaced or reimplemented by this project — it stays the unmodified, fully-capable agentic engine (TUI, tools, memory, workflows) that Nous Research ships. SalesPilot (Go API + React) is a **separate orchestration/business application** in front of it:
+
+- **Web App responsibilities:** authentication, database, CRUD, business logic, role & permission (RBAC), audit trail, logging, configuration, and the integration glue to Hermes.
+- **Prompt engineering lives entirely in the backend.** Users never prompt Hermes directly — they fill a form or click a button; the Go API (`internal/ai/scoring.go`, `playbook.go`, `report.go`, `learning.go`) composes the optimal prompt, calls Hermes via the ACL, persists the result to Postgres, and the React frontend just renders it. This keeps prompting consistent, efficient, accurate, and independent of end-user prompting skill.
+- **Hermes is treated like an AI employee**, called on demand by the orchestrator — not a chat partner the user talks to freely (the one exception is the mediated Chat feature, EP-04, which still flows through hermes-bridge's session/memory model rather than a raw Hermes session).
+- **`hermes-tui` is an admin-only escape hatch, not a rebuild.** The Settings → Hermes TUI tab embeds/proxies the real, unmodified Hermes CLI (via a `ttyd` sidecar, see `services/hermes-tui/`) so an administrator can reach the full native tool when needed (e.g. `hermes auth add codex --type oauth`). It is not a replacement UI and is not part of the primary user flow.
+
+This is not a future plan — EP-01 through EP-18 (see `epic.plan.md`) already implement this split in full.
+
 ## Overview
 
 | Service | Tech | Role |

@@ -24,6 +24,10 @@ type httpClient struct {
 // compile-time assertion: httpClient harus memenuhi seluruh interface Client.
 var _ Client = (*httpClient)(nil)
 
+// compile-time assertion: httpClient juga memenuhi DocumentExtractor
+// (optional capability — lihat komentar di client.go).
+var _ DocumentExtractor = (*httpClient)(nil)
+
 // New membuat Client baru dari konfigurasi aplikasi.
 // Tidak menyimpan WorkspaceSessionKey di sini — session key dilewatkan per-call
 // oleh caller (biasanya cfg.WorkspaceSessionKey).

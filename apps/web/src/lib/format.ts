@@ -41,6 +41,10 @@ export function formatTanggal(input: Date | string): string {
   return tanggalFormatter.format(date)
 }
 
+export function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'profil'
+}
+
 export function formatRelative(input: Date | string, now?: Date): string {
   const date = typeof input === 'string' ? new Date(input) : input
   const base = now ?? new Date()

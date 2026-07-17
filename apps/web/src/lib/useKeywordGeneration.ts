@@ -23,7 +23,7 @@ export function useKeywordGeneration() {
       const res = await mutation.mutateAsync({ service_categories: categories })
       setDegraded(res.degraded)
       if (res.degraded) {
-        toast.warning('AI tidak tersedia — hanya keyword negatif preset yang terisi.')
+        toast.warning('AI tidak tersedia, hanya keyword negatif preset yang terisi.')
       } else {
         toast.success('Keyword berhasil dibuat, silakan tinjau.')
       }

@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"mime/multipart"
 	"net/http"
 	"testing"
@@ -48,7 +47,7 @@ func buildMultipartPDF(t *testing.T, filename string, content []byte) *multipart
 }
 
 func TestProfileService_IngestUpload_RejectsNonPDF(t *testing.T) {
-	svc := NewProfileService(nil, t.TempDir(), nil)
+	svc := NewProfileService(nil, t.TempDir(), nil, nil)
 	fh := buildMultipartPDF(t, "notes.txt", []byte("just plain text"))
 
 	_, err := svc.IngestUpload(context.Background(), fh)
@@ -60,7 +59,7 @@ func TestProfileService_IngestUpload_RejectsNonPDF(t *testing.T) {
 
 func TestProfileService_IngestUpload_NoExtractor_Degrades(t *testing.T) {
 	dir := t.TempDir()
-	svc := NewProfileService(nil, dir, nil) // extractor=nil
+	svc := NewProfileService(nil, dir, nil, nil) // extractor=nil, crawl=nil
 
 	fh := buildMultipartPDF(t, "profile.pdf", []byte("%PDF-1.4\nfake content"))
 
@@ -79,54 +78,27 @@ func TestProfileService_IngestUpload_NoExtractor_Degrades(t *testing.T) {
 	}
 }
 
-func TestProfileService_IngestUpload_NoTextLayer_Degrades(t *testing.T) {
-	dir := t.TempDir()
-	extractor := ai.NewExtractor(&stubHermesClient{
-		generateJSON: func(_ context.Context, _ string, _ any, _ hermes.SessionKey) (json.RawMessage, error) {
-			t.Fatal("GenerateJSON should not be called when the PDF has no text layer")
-			return nil, nil
-		},
-	}, "sk-test")
-	svc := NewProfileService(nil, dir, extractor)
-
-	// A minimal PDF with no readable text layer — ExtractText itself is
-	// unlikely to even parse this malformed content, which is fine: any
-	// extraction failure (no text OR unparsable) must degrade the same way.
-	fh := buildMultipartPDF(t, "scan.pdf", []byte("%PDF-1.4\nnot a real pdf structure"))
-
-	result, err := svc.IngestUpload(context.Background(), fh)
-	if err != nil {
-		t.Fatalf("IngestUpload: unexpected error: %v", err)
-	}
-	if !result.Degraded {
-		t.Error("Degraded = false, want true (unreadable/no-text PDF)")
-	}
-	if result.Draft != nil {
-		t.Errorf("Draft = %+v, want nil", result.Draft)
-	}
-}
-
 func TestProfileService_IngestUpload_HermesFails_Degrades(t *testing.T) {
 	dir := t.TempDir()
 	extractor := ai.NewExtractor(&stubHermesClient{
-		generateJSON: func(_ context.Context, _ string, _ any, _ hermes.SessionKey) (json.RawMessage, error) {
+		generateJSONFromDocument: func(_ context.Context, _ string, _ string, _ []byte, _ any, _ hermes.SessionKey) (json.RawMessage, error) {
 			return nil, errors.New("hermes down")
 		},
 	}, "sk-test")
-	svc := NewProfileService(nil, dir, extractor)
+	svc := NewProfileService(nil, dir, extractor, nil)
 
-	// Valid single-page PDF with real extractable text, built the same way
-	// as internal/ai/profile_extract_test.go's buildMinimalPDF, inlined here
-	// to avoid a cross-package test dependency.
-	content := minimalPDFWithText(t, "Perusahaan Contoh Teknologi")
-	fh := buildMultipartPDF(t, "profile.pdf", content)
+	// The AI ingest path (vision-based, sends raw bytes to Hermes) no longer
+	// needs a real PDF structure — Go's own upload validation only checks
+	// the magic bytes (storage.SavePDF), and any deeper PDF validity check
+	// now happens bridge-side against the actual rendering pipeline.
+	fh := buildMultipartPDF(t, "profile.pdf", []byte("%PDF-1.4\nfake content"))
 
 	result, err := svc.IngestUpload(context.Background(), fh)
 	if err != nil {
 		t.Fatalf("IngestUpload: unexpected error: %v", err)
 	}
 	if !result.Degraded {
-		t.Error("Degraded = false, want true (Hermes GenerateJSON failed)")
+		t.Error("Degraded = false, want true (Hermes GenerateJSONFromDocument failed)")
 	}
 	if result.Draft != nil {
 		t.Errorf("Draft = %+v, want nil", result.Draft)
@@ -139,7 +111,13 @@ func TestProfileService_IngestUpload_HermesFails_Degrades(t *testing.T) {
 func TestProfileService_IngestUpload_Success(t *testing.T) {
 	dir := t.TempDir()
 	extractor := ai.NewExtractor(&stubHermesClient{
-		generateJSON: func(_ context.Context, _ string, schema any, _ hermes.SessionKey) (json.RawMessage, error) {
+		generateJSONFromDocument: func(_ context.Context, _ string, filename string, fileBytes []byte, schema any, _ hermes.SessionKey) (json.RawMessage, error) {
+			if filename != "profile.pdf" {
+				t.Errorf("filename = %q, want profile.pdf", filename)
+			}
+			if len(fileBytes) == 0 {
+				t.Error("fileBytes empty, want the raw uploaded PDF bytes")
+			}
 			raw := []byte(`{"company_name":"PT Contoh","one_liner":"Kami membangun aplikasi","service_categories":["Web App"],"tech_stack":["Go"]}`)
 			if err := json.Unmarshal(raw, schema); err != nil {
 				t.Fatalf("unmarshal into schema: %v", err)
@@ -147,10 +125,9 @@ func TestProfileService_IngestUpload_Success(t *testing.T) {
 			return raw, nil
 		},
 	}, "sk-test")
-	svc := NewProfileService(nil, dir, extractor)
+	svc := NewProfileService(nil, dir, extractor, nil)
 
-	content := minimalPDFWithText(t, "PT Contoh company profile")
-	fh := buildMultipartPDF(t, "profile.pdf", content)
+	fh := buildMultipartPDF(t, "profile.pdf", []byte("%PDF-1.4\nPT Contoh company profile"))
 
 	result, err := svc.IngestUpload(context.Background(), fh)
 	if err != nil {
@@ -165,37 +142,4 @@ func TestProfileService_IngestUpload_Success(t *testing.T) {
 	if result.Draft.CompanyName != "PT Contoh" {
 		t.Errorf("Draft.CompanyName = %q, want %q", result.Draft.CompanyName, "PT Contoh")
 	}
-}
-
-// minimalPDFWithText builds a byte-accurate minimal single-page PDF whose
-// content stream shows text via the Tj operator — mirrors
-// internal/ai/profile_extract_test.go's buildMinimalPDF (duplicated rather
-// than exported across packages purely for a test fixture).
-func minimalPDFWithText(t *testing.T, text string) []byte {
-	t.Helper()
-	var buf bytes.Buffer
-	var offsets [6]int
-
-	buf.WriteString("%PDF-1.4\n")
-	writeObj := func(num int, body string) {
-		offsets[num] = buf.Len()
-		fmt.Fprintf(&buf, "%d 0 obj\n%s\nendobj\n", num, body)
-	}
-	writeObj(1, "<< /Type /Catalog /Pages 2 0 R >>")
-	writeObj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-	writeObj(3, "<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /MediaBox [0 0 200 200] /Contents 5 0 R >>")
-	writeObj(4, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-	content := fmt.Sprintf("BT /F1 24 Tf 10 100 Td (%s) Tj ET", text)
-	streamBody := fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(content), content)
-	writeObj(5, streamBody)
-
-	xrefOffset := buf.Len()
-	buf.WriteString("xref\n0 6\n0000000000 65535 f \n")
-	for i := 1; i <= 5; i++ {
-		fmt.Fprintf(&buf, "%010d 00000 n \n", offsets[i])
-	}
-	buf.WriteString("trailer\n<< /Size 6 /Root 1 0 R >>\n")
-	fmt.Fprintf(&buf, "startxref\n%d\n%%%%EOF", xrefOffset)
-
-	return buf.Bytes()
 }

@@ -11,6 +11,7 @@ import (
 
 	"salespilot/internal/ai"
 	"salespilot/internal/domain"
+	"salespilot/internal/http/httperr"
 )
 
 // pgUniqueViolation is the Postgres error code for a unique constraint
@@ -31,6 +32,9 @@ const discoveryRunTimeout = 10 * time.Minute
 // (already covered by internal/ai's own tests) — tests here inject a fake.
 type candidateCollector interface {
 	CollectCandidates(ctx context.Context) ([]ai.CandidateTender, []domain.Source, error)
+	// CrawlableSources reports what a run would crawl — RunAsync refuses to
+	// start when this is empty (lihat guard NO_SOURCES).
+	CrawlableSources(ctx context.Context) ([]domain.Source, error)
 }
 
 // DiscoveryService orchestrates one discovery run at the service layer:
@@ -150,6 +154,25 @@ func (s *DiscoveryService) ExecuteRun(ctx context.Context, runID string) error {
 // merely reused (started=false, an idempotent replay) is not re-executed —
 // it is either already running or already finished.
 func (s *DiscoveryService) RunAsync(ctx context.Context, correlationKey *string) (*domain.DiscoveryRun, error) {
+	// Single-flight: crawl bisa lama (menit) dan mahal — bila sudah ada run
+	// pending/running, kembalikan run itu apa adanya alih-alih memulai run
+	// baru. Berlaku lintas user dan lintas trigger (manual maupun cron).
+	if active, err := s.runs.GetActive(ctx); err == nil && active != nil {
+		return active, nil
+	}
+
+	// Guard: tanpa sumber yang bisa di-crawl, run hanya akan "sukses" dalam
+	// milidetik dengan nol hasil — tolak dengan pesan yang menjelaskan apa
+	// yang harus dilakukan user, bukan diam-diam kosong.
+	crawlable, err := s.collector.CrawlableSources(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("discovery.RunAsync: %w", err)
+	}
+	if len(crawlable) == 0 {
+		return nil, httperr.NewBadRequest("NO_SOURCES",
+			"Belum ada sumber aktif yang bisa di-crawl. Tambahkan atau aktifkan sumber publik di Profil bagian Website Dipantau.")
+	}
+
 	run, started, err := s.StartRun(ctx, correlationKey)
 	if err != nil {
 		return nil, err

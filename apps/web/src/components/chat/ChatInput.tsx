@@ -1,17 +1,35 @@
-import { useState, type ReactNode } from 'react'
-import { SendHorizonal, Square } from 'lucide-react'
+import { useRef, useState, type ReactNode } from 'react'
+import { Paperclip, SendHorizonal, Square, X } from 'lucide-react'
 import { cn } from '../../lib/cn'
+import { toast } from '../../lib/toast'
+import type { ChatAttachment } from '../../lib/sse'
 import Button from '../ui/Button'
 import SuggestedPrompts from './SuggestedPrompts'
 
+const MAX_ATTACHMENT_MB = 10
+const ACCEPTED = '.pdf,.png,.jpg,.jpeg,.webp'
+
 export interface ChatInputProps {
-  onSend: (text: string) => void
+  onSend: (text: string, attachment?: ChatAttachment) => void
   onStop: () => void
   streaming: boolean
   disabled?: boolean
   contextChip?: ReactNode
   showSuggested?: boolean
   className?: string
+}
+
+/** Baca file jadi base64 murni (tanpa prefix data URL). */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      resolve(result.slice(result.indexOf(',') + 1))
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
 }
 
 export default function ChatInput({
@@ -24,12 +42,35 @@ export default function ChatInput({
   className,
 }: ChatInputProps) {
   const [text, setText] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  function submit() {
+  async function submit() {
     const trimmed = text.trim()
-    if (!trimmed || disabled || streaming) return
-    onSend(trimmed)
+    if ((!trimmed && !file) || disabled || streaming) return
+
+    let attachment: ChatAttachment | undefined
+    if (file) {
+      try {
+        attachment = { name: file.name, base64: await fileToBase64(file) }
+      } catch {
+        toast.error('Gagal membaca file lampiran.')
+        return
+      }
+    }
+
+    onSend(trimmed || `Tolong baca dan jelaskan isi dokumen ini.`, attachment)
     setText('')
+    setFile(null)
+  }
+
+  function handleFilePick(f: File | undefined) {
+    if (!f) return
+    if (f.size > MAX_ATTACHMENT_MB * 1024 * 1024) {
+      toast.error(`Ukuran lampiran maksimal ${MAX_ATTACHMENT_MB} MB.`)
+      return
+    }
+    setFile(f)
   }
 
   return (
@@ -42,8 +83,52 @@ export default function ChatInput({
       {/* Context chip */}
       {contextChip && <div>{contextChip}</div>}
 
+      {/* Attachment chip */}
+      {file && (
+        <div className="inline-flex items-center gap-2 self-start rounded-pill border border-accent/40 bg-accent-subtle px-3 py-1 text-caption text-fg">
+          <Paperclip className="w-3.5 h-3.5 text-accent-hover" aria-hidden="true" />
+          <span className="max-w-56 truncate font-medium">{file.name}</span>
+          <button
+            type="button"
+            aria-label="Hapus lampiran"
+            onClick={() => setFile(null)}
+            className="text-fg-muted hover:text-danger transition-colors focus-visible:outline-none"
+          >
+            <X className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       {/* Input row */}
       <div className="flex gap-2 items-end">
+        {/* Attach file */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPTED}
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(e) => {
+            handleFilePick(e.target.files?.[0])
+            e.target.value = ''
+          }}
+        />
+        <button
+          type="button"
+          aria-label="Lampirkan dokumen (PDF atau gambar)"
+          disabled={disabled || streaming}
+          onClick={() => fileInputRef.current?.click()}
+          className={cn(
+            'shrink-0 h-10 w-10 inline-flex items-center justify-center rounded-btn border border-line bg-surface',
+            'text-fg-muted hover:text-primary hover:border-primary-border transition-colors',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
+            'disabled:opacity-40 disabled:cursor-not-allowed',
+          )}
+        >
+          <Paperclip className="w-4 h-4" aria-hidden="true" />
+        </button>
+
         <textarea
           rows={1}
           value={text}
@@ -51,7 +136,7 @@ export default function ChatInput({
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
-              submit()
+              void submit()
             }
           }}
           onInput={(e) => {
@@ -83,8 +168,8 @@ export default function ChatInput({
           <Button
             variant="primary"
             size="md"
-            onClick={submit}
-            disabled={!text.trim() || disabled}
+            onClick={() => void submit()}
+            disabled={(!text.trim() && !file) || disabled}
             leftIcon={<SendHorizonal className="w-4 h-4" aria-hidden="true" />}
             aria-label="Kirim pesan"
           >
@@ -92,10 +177,6 @@ export default function ChatInput({
           </Button>
         )}
       </div>
-
-      <p className="text-caption text-fg-subtle">
-        Asisten belajar dari aktivitas &amp; hasil kamu
-      </p>
     </div>
   )
 }

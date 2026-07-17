@@ -1,77 +1,45 @@
 import { useState } from 'react'
-import { Sparkles, FileText } from 'lucide-react'
+import { FileText, X } from 'lucide-react'
 
 import FileDropzone from '../ui/FileDropzone'
 import Button from '../ui/Button'
-import Field from '../ui/Field'
-import Input from '../ui/Input'
-import ChipInput from '../ui/ChipInput'
-import Badge from '../ui/Badge'
-import { toast } from '../../lib/toast'
 import { announce } from '../../lib/a11y'
 
-import { useIngestProfilePdf, useSaveProfile } from '../../api/profile'
-import type { Profile } from '../../api/profile'
+import { useIngestProfilePdf } from '../../api/profile'
+import type { OtakAgentFormPatch } from './types'
 
 export interface ProfilePdfIngestProps {
-  /** Current profile (used to preserve fields the draft didn't touch, and to
-   * append the new doc ref onto source_doc_refs rather than replacing it). */
-  profile?: Profile
   disabled?: boolean
-  onSaved?: (updated: Profile) => void
+  /** Called once with the fields the AI actually found (already merged with
+   * the doc ref) — the caller (SettingsProfile) patches the live edit form
+   * with it so the user reviews everything via the normal cards, then saves
+   * with the single existing "Simpan" action (no separate save here). */
+  onDraftApplied: (patch: OtakAgentFormPatch, docRef: string) => void
   className?: string
 }
 
-interface DraftForm {
-  companyName: string
-  oneLiner: string
-  serviceCategories: string[]
-  techStack: string[]
-  // Which fields the AI itself actually populated (vs. falling back to the
-  // existing profile value) — drives the "diisi AI ✨" chip per field.
-  aiFilled: {
-    companyName: boolean
-    oneLiner: boolean
-    serviceCategories: boolean
-    techStack: boolean
-  }
-}
-
-function AiFilledChip() {
-  return (
-    <Badge tone="accent" className="gap-1">
-      <Sparkles className="w-3 h-3" aria-hidden="true" />
-      diisi AI
-    </Badge>
-  )
-}
-
-/** Dropzone → AI extraction → editable review → confirm & save, for Company
- * Profile PDF ingest (EP-13 ST-13.3). Shared between Onboarding and Otak
- * Agent. Never auto-saves: the user always reviews/edits before the draft is
- * merged into the profile via PUT /api/profile (useSaveProfile). */
-export default function ProfilePdfIngest({ profile, disabled, onSaved, className }: ProfilePdfIngestProps) {
+/** Dropzone → AI extraction → merge into the live Otak Agent form (EP-13
+ * ST-13.3). Never saves on its own: extraction only produces a form patch,
+ * which the user reviews/edits via the normal cards before the one "Simpan"
+ * button persists it via PUT /api/profile. */
+export default function ProfilePdfIngest({ disabled, onDraftApplied, className }: ProfilePdfIngestProps) {
   const ingest = useIngestProfilePdf()
-  const saveProfile = useSaveProfile()
 
-  const [docRef, setDocRef] = useState<string | null>(null)
   const [degraded, setDegraded] = useState(false)
-  const [draft, setDraft] = useState<DraftForm | null>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [appliedSections, setAppliedSections] = useState<string[] | null>(null)
 
   async function handleFiles(files: File[]) {
     const file = files[0]
     if (!file) return
 
     setUploadError(null)
-    setDraft(null)
     setDegraded(false)
-    setDocRef(null)
+    setAppliedSections(null)
     announce('AI membaca dokumen…')
 
     try {
       const res = await ingest.mutateAsync(file)
-      setDocRef(res.doc_ref)
 
       if (!res.draft) {
         setDegraded(true)
@@ -79,53 +47,79 @@ export default function ProfilePdfIngest({ profile, disabled, onSaved, className
         return
       }
 
-      setDraft({
-        companyName: res.draft.company_name || profile?.company_name || '',
-        oneLiner: res.draft.one_liner || profile?.one_liner || '',
-        serviceCategories: res.draft.service_categories.length
-          ? res.draft.service_categories
-          : (profile?.service_categories ?? []),
-        techStack: res.draft.tech_stack.length ? res.draft.tech_stack : (profile?.tech_stack ?? []),
-        aiFilled: {
-          companyName: !!res.draft.company_name,
-          oneLiner: !!res.draft.one_liner,
-          serviceCategories: res.draft.service_categories.length > 0,
-          techStack: res.draft.tech_stack.length > 0,
-        },
-      })
-      announce('AI selesai membaca dokumen — silakan tinjau hasilnya di bawah.')
+      const d = res.draft
+      const t = d.target
+      const patch: OtakAgentFormPatch = {}
+      const sections: string[] = []
+
+      if (d.company_name || d.one_liner) {
+        if (d.company_name) patch.companyName = d.company_name
+        if (d.one_liner) patch.oneLiner = d.one_liner
+        sections.push('Identitas')
+      }
+      if (d.service_categories.length || d.tech_stack.length || d.products.length) {
+        if (d.service_categories.length) patch.serviceCategories = d.service_categories
+        if (d.tech_stack.length) patch.techStack = d.tech_stack
+        if (d.products.length) patch.products = d.products
+        sections.push('Produk & Layanan')
+      }
+      if (d.portfolio_refs.length) {
+        patch.portfolioRefs = d.portfolio_refs
+        sections.push('Bukti/Portfolio')
+      }
+      if (d.vision || d.mission) {
+        if (d.vision) patch.vision = d.vision
+        if (d.mission) patch.mission = d.mission
+        sections.push('Visi & Misi')
+      }
+      if (
+        t.countries.length ||
+        t.industries.length ||
+        t.value_min != null ||
+        t.value_ideal != null ||
+        t.value_max != null ||
+        t.deadline_min_days != null ||
+        t.procurement_types.length ||
+        t.buyer_size_note ||
+        t.document_languages.length ||
+        t.work_model ||
+        t.onsite_limit_note ||
+        t.decision_maker_roles.length
+      ) {
+        if (t.countries.length) patch.countries = t.countries
+        if (t.industries.length) patch.industries = t.industries
+        if (t.value_min != null) patch.valueMin = String(t.value_min)
+        if (t.value_ideal != null) patch.valueIdeal = String(t.value_ideal)
+        if (t.value_max != null) patch.valueMax = String(t.value_max)
+        if (t.deadline_min_days != null) patch.deadlineMinDays = String(t.deadline_min_days)
+        if (t.procurement_types.length) patch.procurementTypes = t.procurement_types
+        if (t.buyer_size_note) patch.buyerSizeNote = t.buyer_size_note
+        if (t.document_languages.length) patch.documentLanguages = t.document_languages
+        if (t.work_model) patch.workModel = t.work_model
+        if (t.onsite_limit_note) patch.onsiteLimitNote = t.onsite_limit_note
+        if (t.decision_maker_roles.length) patch.decisionMakerRoles = t.decision_maker_roles
+        sections.push('Target Peluang')
+      }
+      if (d.nogo_custom.length) {
+        patch.customNoGo = d.nogo_custom
+        sections.push('No-Go')
+      }
+      if (d.keywords.length || d.negative_keywords.length) {
+        if (d.keywords.length) patch.keywords = d.keywords
+        if (d.negative_keywords.length) patch.negativeKeywords = d.negative_keywords
+        sections.push('Keyword')
+      }
+
+      onDraftApplied(patch, res.doc_ref)
+      setAppliedSections(sections)
+      announce(
+        sections.length
+          ? `AI selesai membaca dokumen — ${sections.length} bagian terisi. Tinjau lalu simpan.`
+          : 'AI selesai membaca dokumen, namun tidak ada field yang ditemukan.'
+      )
     } catch {
       setUploadError('Gagal mengunggah PDF. Coba lagi atau isi manual.')
       announce('Gagal mengunggah PDF.', 'assertive')
-    }
-  }
-
-  function patchDraft(patch: Partial<Pick<DraftForm, 'companyName' | 'oneLiner' | 'serviceCategories' | 'techStack'>>) {
-    setDraft((d) => (d ? { ...d, ...patch } : d))
-  }
-
-  function handleDiscard() {
-    setDraft(null)
-    setDegraded(false)
-    setDocRef(null)
-    setUploadError(null)
-  }
-
-  async function handleUseAndSave() {
-    if (!draft || !docRef) return
-    try {
-      const updated = await saveProfile.mutateAsync({
-        company_name: draft.companyName || 'Perusahaan',
-        one_liner: draft.oneLiner || undefined,
-        service_categories: draft.serviceCategories,
-        tech_stack: draft.techStack,
-        source_doc_refs: [...(profile?.source_doc_refs ?? []), docRef],
-      })
-      toast.success('Profil diperbarui dari PDF.')
-      handleDiscard()
-      onSaved?.(updated)
-    } catch {
-      toast.error('Gagal menyimpan profil.')
     }
   }
 
@@ -133,15 +127,15 @@ export default function ProfilePdfIngest({ profile, disabled, onSaved, className
 
   return (
     <div className={className}>
-      {!draft && !degraded && (
+      {appliedSections === null && !degraded && (
         <div className="flex flex-col gap-2">
-          <FileDropzone onFiles={handleFiles} disabled={disabled || isBusy} maxSizeMB={10} />
-          {isBusy && (
-            <p className="text-caption text-fg-muted flex items-center gap-1.5" role="status">
-              <Sparkles className="w-3.5 h-3.5 text-accent animate-pulse" aria-hidden="true" />
-              AI membaca dokumen…
-            </p>
-          )}
+          <FileDropzone
+            onFiles={handleFiles}
+            disabled={disabled}
+            loading={isBusy}
+            loadingLabel="AI membaca dokumen — bisa memakan beberapa menit untuk dokumen panjang…"
+            maxSizeMB={10}
+          />
           {uploadError && <p className="text-caption text-danger">{uploadError}</p>}
         </div>
       )}
@@ -152,69 +146,34 @@ export default function ProfilePdfIngest({ profile, disabled, onSaved, className
             AI tidak dapat membaca dokumen ini (kemungkinan hasil scan atau tidak tersedia).
             Silakan isi profil secara manual.
           </p>
-          <Button variant="secondary" size="sm" className="self-start" onClick={handleDiscard}>
+          <Button variant="secondary" size="sm" className="self-start" onClick={() => setDegraded(false)}>
             Coba unggah lagi
           </Button>
         </div>
       )}
 
-      {draft && (
-        <div className="flex flex-col gap-4 p-4 rounded-card border border-line bg-surface">
-          <div className="flex items-center gap-1.5 text-caption text-fg-muted">
-            <FileText className="w-3.5 h-3.5" aria-hidden="true" />
-            Hasil ekstraksi — tinjau &amp; edit sebelum disimpan
+      {appliedSections !== null && (
+        <div className="flex items-start gap-2 p-3 rounded-card border border-l-4 border-line border-l-warning bg-surface text-caption text-fg shadow-subtle">
+          <FileText className="w-4 h-4 mt-0.5 shrink-0 text-warning" aria-hidden="true" />
+          <div className="flex-1">
+            {appliedSections.length > 0 ? (
+              <>
+                Terisi dari PDF: <span className="font-medium">{appliedSections.join(', ')}</span>. Tinjau di
+                kartu terkait di bawah — <span className="font-semibold">perubahan ini belum tersimpan</span>,
+                klik <span className="font-semibold">Simpan</span> di bagian bawah halaman untuk menyimpannya.
+              </>
+            ) : (
+              'AI tidak menemukan field yang bisa diisi dari dokumen ini.'
+            )}
           </div>
-
-          <Field
-            label="Nama perusahaan"
-            required
-            helper={draft.aiFilled.companyName ? undefined : 'Tidak ditemukan di dokumen'}
+          <button
+            type="button"
+            onClick={() => setAppliedSections(null)}
+            className="text-fg-subtle hover:text-fg shrink-0"
+            aria-label="Tutup"
           >
-            <div className="flex items-center gap-2">
-              <Input
-                value={draft.companyName}
-                onChange={(e) => patchDraft({ companyName: e.target.value })}
-                placeholder="PT Contoh Teknologi"
-                className="flex-1"
-              />
-              {draft.aiFilled.companyName && <AiFilledChip />}
-            </div>
-          </Field>
-
-          <Field label="One-liner" helper={draft.aiFilled.oneLiner ? undefined : 'Tidak ditemukan di dokumen'}>
-            <div className="flex items-center gap-2">
-              <Input
-                value={draft.oneLiner}
-                onChange={(e) => patchDraft({ oneLiner: e.target.value })}
-                placeholder="Kami membangun software untuk…"
-                className="flex-1"
-              />
-              {draft.aiFilled.oneLiner && <AiFilledChip />}
-            </div>
-          </Field>
-
-          <Field label="Kategori layanan">
-            <div className="flex flex-col gap-1.5">
-              <ChipInput value={draft.serviceCategories} onChange={(v) => patchDraft({ serviceCategories: v })} />
-              {draft.aiFilled.serviceCategories && <AiFilledChip />}
-            </div>
-          </Field>
-
-          <Field label="Tech stack">
-            <div className="flex flex-col gap-1.5">
-              <ChipInput value={draft.techStack} onChange={(v) => patchDraft({ techStack: v })} />
-              {draft.aiFilled.techStack && <AiFilledChip />}
-            </div>
-          </Field>
-
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <Button variant="secondary" size="sm" onClick={handleDiscard} disabled={saveProfile.isPending}>
-              Buang
-            </Button>
-            <Button size="sm" loading={saveProfile.isPending} onClick={handleUseAndSave}>
-              Gunakan &amp; Simpan
-            </Button>
-          </div>
+            <X className="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
         </div>
       )}
     </div>

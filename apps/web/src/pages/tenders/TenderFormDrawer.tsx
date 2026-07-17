@@ -143,7 +143,7 @@ export default function TenderFormDrawer({ open, onClose, tender, onSaved }: Ten
       }
       toast.success(isEdit ? 'Tender diperbarui.' : 'Tender dibuat.')
       if (withAnalyze) {
-        toast.info('Analisa AI akan tersedia di EP-10.')
+        toast.info('Analisa AI bisa dijalankan dari halaman detail tender.')
       }
       onSaved?.(saved)
       onClose()

@@ -17,6 +17,7 @@ import { useProfile, useSaveProfile } from '../../api/profile'
 import { useKeywordGeneration } from '../../lib/useKeywordGeneration'
 import { useCan } from '../../lib/useCan'
 import { CAPABILITY_PRESETS, DEFAULT_VALUE_MIN } from '../../lib/profilePresets'
+import type { OtakAgentFormPatch } from '../../components/profile/types'
 
 const steps: StepItem[] = [
   { id: 'path', label: 'Cara mulai' },
@@ -59,10 +60,25 @@ export default function Onboarding() {
     navigate('/')
   }
 
-  // After ProfilePdfIngest itself confirms the save (its own success toast
-  // already fired), still run the same activation follow-through as the
-  // manual path: best-effort discovery kick + redirect to the inbox.
-  async function handlePdfSaved() {
+  // ProfilePdfIngest only merges the AI's findings into a form-shaped patch
+  // (it never saves on its own) — the fast onboarding path has no full form
+  // to review it in, so save immediately here with the same fields the
+  // manual path below saves (company_name, service_categories), then run the
+  // same activation follow-through: best-effort discovery kick + redirect.
+  async function handleDraftApplied(patch: OtakAgentFormPatch, docRef: string) {
+    try {
+      await saveProfile.mutateAsync({
+        company_name: patch.companyName || companyName || 'Perusahaan',
+        one_liner: patch.oneLiner,
+        service_categories: patch.serviceCategories,
+        tech_stack: patch.techStack,
+        source_doc_refs: [...(profile?.source_doc_refs ?? []), docRef],
+      })
+      toast.success('Profil diperbarui dari PDF.')
+    } catch {
+      toast.error('Gagal menyimpan profil.')
+      return
+    }
     try {
       await triggerFirstDiscovery()
     } catch {
@@ -115,10 +131,10 @@ export default function Onboarding() {
       } catch {
         // best-effort — discovery (EP-12) not built yet, never block activation
       }
-      toast.success('Otak agent diaktifkan!')
+      toast.success('Otak agent berhasil diaktifkan.')
       navigate('/discovery')
     } catch {
-      toast.error('Gagal menyimpan profil. Coba lagi.')
+      toast.error('Gagal menyimpan profil, coba lagi.')
     }
   }
 
@@ -185,7 +201,7 @@ export default function Onboarding() {
         {stepIndex === 1 && path === 'pdf' && (
           <Card>
             <CardBody className="flex flex-col gap-4">
-              <ProfilePdfIngest profile={profile} onSaved={handlePdfSaved} />
+              <ProfilePdfIngest onDraftApplied={handleDraftApplied} />
               <div className="flex items-center justify-between pt-2">
                 <button
                   type="button"

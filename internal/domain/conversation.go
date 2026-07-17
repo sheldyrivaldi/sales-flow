@@ -56,6 +56,10 @@ type ChatRepository interface {
 	GetConversationByID(ctx context.Context, id, ownerID string) (*Conversation, error)
 	ListConversations(ctx context.Context, f ConversationFilter, page, pageSize int) ([]Conversation, int64, error)
 	UpdateConversation(ctx context.Context, c *Conversation) error
+	// DeleteConversation removes a conversation owned by ownerID. Its
+	// messages cascade via the DB FK (message.conversation_id ON DELETE
+	// CASCADE) — no separate message cleanup needed.
+	DeleteConversation(ctx context.Context, id, ownerID string) error
 	CreateMessage(ctx context.Context, m *Message) error
 	ListMessages(ctx context.Context, conversationID string) ([]Message, error)
 }

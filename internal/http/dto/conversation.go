@@ -70,6 +70,13 @@ type ConversationDetailResponse struct {
 
 // --- Chat message request ---
 
+// ChatMessageRequest is the body of POST /api/conversations/:id/chat.
+// AttachmentBase64/AttachmentName carry one optional document (PDF or image)
+// the AI should read alongside the text — forwarded to the bridge, which
+// renders PDFs to page images for native vision reading (same pipeline as
+// Company Profile ingest). Max ~10 MB raw enforced handler-side.
 type ChatMessageRequest struct {
-	Content string `json:"content" validate:"required"`
+	Content          string  `json:"content" validate:"required"`
+	AttachmentName   *string `json:"attachment_name"`
+	AttachmentBase64 *string `json:"attachment_base64"`
 }

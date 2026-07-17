@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronUp, ChevronDown, ChevronsUpDown, MoreVertical } from 'lucide-react'
 import { cn } from '../../lib/cn'
+import { useFloatingPosition } from '../../lib/useFloatingPosition'
 import Button from './Button'
 
 export interface Column<T> {
@@ -52,12 +54,21 @@ function SortIcon({ dir }: { dir: SortDir }) {
 
 function RowMenu({ actions }: { actions: KebabAction[] }) {
   const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLUListElement>(null)
+  // align="end" (right-aligned to the trigger) — portaled + fixed-positioned
+  // (see useFloatingPosition) so the menu isn't clipped by Table's own
+  // `overflow-auto` wrapper (needed for horizontal scroll on wide tables),
+  // which a plain `absolute` dropdown always was.
+  const pos = useFloatingPosition(triggerRef, open, 'end')
 
   useEffect(() => {
     if (!open) return
     function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (triggerRef.current?.contains(target)) return
+      if (menuRef.current?.contains(target)) return
+      setOpen(false)
     }
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpen(false)
@@ -71,7 +82,7 @@ function RowMenu({ actions }: { actions: KebabAction[] }) {
   }, [open])
 
   return (
-    <div ref={ref} className="relative inline-block">
+    <div ref={triggerRef} className="relative inline-block">
       <button
         type="button"
         aria-label="Opsi"
@@ -85,28 +96,38 @@ function RowMenu({ actions }: { actions: KebabAction[] }) {
       >
         <MoreVertical className="w-4 h-4" aria-hidden="true" />
       </button>
-      {open && (
-        <ul
-          role="menu"
-          className="absolute right-0 z-50 mt-1 min-w-35 bg-surface border border-line rounded-btn shadow-subtle py-1"
-        >
-          {actions.map((action, i) => (
-            <li key={i} role="none">
-              <button
-                role="menuitem"
-                type="button"
-                onClick={() => { action.onClick(); setOpen(false) }}
-                className={cn(
-                  'w-full text-left px-3 py-2 text-body hover:bg-surface-subtle transition-colors',
-                  action.danger ? 'text-danger' : 'text-fg'
-                )}
-              >
-                {action.label}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      {open &&
+        pos &&
+        createPortal(
+          <ul
+            ref={menuRef}
+            role="menu"
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              left: pos.left,
+              transform: pos.alignEnd ? 'translateX(-100%)' : undefined,
+            }}
+            className="z-[9000] min-w-35 bg-surface border border-line rounded-btn shadow-lg py-1"
+          >
+            {actions.map((action, i) => (
+              <li key={i} role="none">
+                <button
+                  role="menuitem"
+                  type="button"
+                  onClick={() => { action.onClick(); setOpen(false) }}
+                  className={cn(
+                    'w-full text-left px-3 py-2 text-body hover:bg-surface-subtle transition-colors',
+                    action.danger ? 'text-danger' : 'text-fg'
+                  )}
+                >
+                  {action.label}
+                </button>
+              </li>
+            ))}
+          </ul>,
+          document.body
+        )}
     </div>
   )
 }
@@ -182,7 +203,7 @@ export default function Table<T>({
     <div className="flex flex-col gap-0">
       <div className="overflow-auto">
         <table className="w-full text-body text-fg border-collapse">
-          <thead className={cn(stickyHeader && 'sticky top-0 z-10 bg-surface')}>
+          <thead className={cn('bg-surface-subtle', stickyHeader && 'sticky top-0 z-10')}>
             <tr className="border-b border-line">
               {columns.map((col) => {
                 const dir: SortDir =
@@ -236,7 +257,7 @@ export default function Table<T>({
               pagedData.map((row) => (
                 <tr
                   key={rowKey(row)}
-                  className="border-b border-line hover:bg-surface-subtle transition-colors"
+                  className="border-b border-line hover:bg-primary-subtle transition-colors duration-150"
                 >
                   {columns.map((col) => (
                     <td

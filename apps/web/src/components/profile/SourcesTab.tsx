@@ -17,6 +17,8 @@ import {
   useDeleteSource,
   useActivatePreset,
   ACCESS_LABELS,
+  FREQUENCY_LABELS,
+  priorityLabel,
 } from '../../api/sources'
 import type { Source, SourceAccess } from '../../api/sources'
 import SourceFormModal from './SourceFormModal'
@@ -94,6 +96,8 @@ export default function SourcesTab({ canEdit }: SourcesTabProps) {
       render: (s) => <Badge tone={ACCESS_TONE[s.access]}>{ACCESS_LABELS[s.access]}</Badge>,
     },
     { key: 'legal_note', header: 'Legal note', render: (s) => s.legal_note ?? '—' },
+    { key: 'priority', header: 'Prioritas', render: (s) => priorityLabel(s.priority) },
+    { key: 'frequency', header: 'Frekuensi', render: (s) => FREQUENCY_LABELS[s.frequency] },
     {
       key: 'enabled',
       header: 'Aktif',

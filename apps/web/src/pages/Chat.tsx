@@ -1,32 +1,47 @@
 import { useState } from 'react'
-import { Search, Plus, Sparkles } from 'lucide-react'
-import { useConversations, useConversation, useCreateConversation } from '../api/chat'
+import { Plus, Trash2 } from 'lucide-react'
+import { useConversations, useConversation, useCreateConversation, useDeleteConversation } from '../api/chat'
+import type { ConversationSummary } from '../api/chat'
 import { useChatStream, useChatDegradeStore } from '../store/chat'
+import type { ChatAttachment } from '../lib/sse'
 import { formatRelative } from '../lib/format'
 import { cn } from '../lib/cn'
+import { toast } from '../lib/toast'
 import Skeleton from '../components/ui/Skeleton'
 import EmptyState from '../components/ui/EmptyState'
-import Button from '../components/ui/Button'
-import Input from '../components/ui/Input'
+import Tooltip from '../components/ui/Tooltip'
+import ConfirmDialog from '../components/ui/ConfirmDialog'
 import MessageList from '../components/chat/MessageList'
 import ChatInput from '../components/chat/ChatInput'
 import DegradeBanner from '../components/chat/DegradeBanner'
 
 export default function Chat() {
   const [activeId, setActiveId] = useState<string | undefined>()
-  const [search, setSearch] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<ConversationSummary | undefined>()
 
   const { data: list, isLoading: loadingList } = useConversations()
   const { data: detail, isLoading: loadingDetail } = useConversation(activeId)
   const createConversation = useCreateConversation()
-  const { streaming, draft, liveToolCalls, send, stop } = useChatStream()
+  const deleteConversation = useDeleteConversation()
+  const { streaming, draft, liveToolCalls, pendingUserMessage, send, stop } = useChatStream(activeId)
   const { degraded } = useChatDegradeStore()
 
-  const filtered = (list?.items ?? []).filter((c) =>
-    c.title.toLowerCase().includes(search.toLowerCase()),
-  )
+  const conversations = list?.items ?? []
 
-  async function handleSend(content: string) {
+  async function handleDelete() {
+    if (!deleteTarget) return
+    try {
+      await deleteConversation.mutateAsync(deleteTarget.id)
+      if (activeId === deleteTarget.id) setActiveId(undefined)
+      toast.success('Percakapan dihapus.')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Gagal menghapus percakapan.')
+    } finally {
+      setDeleteTarget(undefined)
+    }
+  }
+
+  async function handleSend(content: string, attachment?: ChatAttachment) {
     if (!content.trim()) return
     let convId = activeId
 
@@ -36,37 +51,35 @@ export default function Chat() {
       setActiveId(convId)
     }
 
-    await send(convId, content)
+    await send(convId, content, attachment)
   }
 
   const activeTitle = detail?.title ?? (activeId ? '…' : 'Chat')
 
   return (
-    <div className="flex h-full -m-6 overflow-hidden">
+    <div className="flex -m-6 h-[calc(100%+3rem)] overflow-hidden">
       {/* ── Left panel: conversation list ──────────────────────────────── */}
-      <aside className="w-64 shrink-0 border-r border-line bg-surface flex flex-col">
-        <div className="p-3 border-b border-line flex items-center gap-2">
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={<Plus className="w-4 h-4" />}
-            onClick={() => setActiveId(undefined)}
-            className="flex-1"
-          >
-            Baru
-          </Button>
-        </div>
-
-        <div className="p-3 border-b border-line">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-fg-subtle pointer-events-none" />
-            <Input
-              placeholder="Cari…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 text-sm"
-            />
-          </div>
+      <aside
+        className="w-64 shrink-0 border-r border-line bg-surface flex flex-col"
+        aria-label="Daftar percakapan"
+      >
+        <div className="p-3 border-b border-line flex items-center justify-between gap-2">
+          <h2 className="text-caption font-semibold text-fg-muted uppercase tracking-wide">
+            Percakapan
+          </h2>
+          <Tooltip content="Percakapan baru">
+            <button
+              type="button"
+              aria-label="Percakapan baru"
+              onClick={() => setActiveId(undefined)}
+              className={cn(
+                'p-1.5 rounded-btn text-fg-muted hover:bg-surface-subtle hover:text-fg transition-colors',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2'
+              )}
+            >
+              <Plus className="w-4 h-4" aria-hidden="true" />
+            </button>
+          </Tooltip>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-2">
@@ -76,28 +89,47 @@ export default function Chat() {
                 <Skeleton key={i} variant="text" className="h-10 w-full" />
               ))}
             </div>
-          ) : filtered.length === 0 ? (
+          ) : conversations.length === 0 ? (
             <EmptyState
               title="Belum ada percakapan"
-              description='Klik "+ Baru" untuk mulai'
+              description="Ketik pesan di bawah untuk mulai"
               className="py-8 px-4"
             />
           ) : (
-            filtered.map((conv) => (
-              <button
+            conversations.map((conv) => (
+              <div
                 key={conv.id}
-                type="button"
-                onClick={() => setActiveId(conv.id)}
                 className={cn(
-                  'w-full text-left px-4 py-2.5 flex flex-col gap-0.5 hover:bg-surface-subtle transition-colors',
+                  'group relative w-full flex items-center hover:bg-surface-subtle transition-colors',
                   activeId === conv.id && 'bg-primary/5 border-l-2 border-primary',
                 )}
               >
-                <span className="text-sm font-medium text-fg truncate">{conv.title}</span>
-                <span className="text-caption text-fg-subtle">
-                  {formatRelative(conv.updated_at)}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveId(conv.id)}
+                  className="flex-1 min-w-0 text-left px-4 py-2.5 flex flex-col gap-0.5"
+                >
+                  <span className="text-sm font-medium text-fg truncate">{conv.title}</span>
+                  <span className="text-caption text-fg-subtle">
+                    {formatRelative(conv.updated_at)}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Hapus percakapan "${conv.title}"`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setDeleteTarget(conv)
+                  }}
+                  className={cn(
+                    'shrink-0 mr-2 p-1.5 rounded-btn text-fg-subtle opacity-0 group-hover:opacity-100',
+                    'hover:bg-surface hover:text-danger transition-colors',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:opacity-100'
+                  )}
+                >
+                  <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                </button>
+              </div>
             ))
           )}
         </nav>
@@ -132,10 +164,6 @@ export default function Chat() {
                 title="Tanya Agen AI"
                 description="Pilih percakapan atau mulai yang baru"
               />
-              <p className="text-caption text-fg-muted flex items-center gap-1">
-                <Sparkles className="w-3.5 h-3.5 text-accent" />
-                Asisten belajar dari aktivitas & hasil kamu.
-              </p>
             </div>
           ) : loadingDetail ? (
             <div className="space-y-3">
@@ -149,6 +177,7 @@ export default function Chat() {
               draft={draft}
               liveToolCalls={liveToolCalls}
               streaming={streaming}
+              pendingUserMessage={pendingUserMessage}
             />
           )}
         </div>
@@ -164,6 +193,17 @@ export default function Chat() {
           />
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onCancel={() => setDeleteTarget(undefined)}
+        onConfirm={handleDelete}
+        title="Hapus percakapan?"
+        description={`Percakapan "${deleteTarget?.title}" beserta seluruh isinya akan dihapus permanen.`}
+        tone="danger"
+        confirmLabel="Hapus"
+        loading={deleteConversation.isPending}
+      />
     </div>
   )
 }

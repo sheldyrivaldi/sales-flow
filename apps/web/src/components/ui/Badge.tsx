@@ -78,14 +78,14 @@ type ProspectStage = 'NEW' | 'QUALIFIED' | 'ENGAGED' | 'PROPOSAL' | 'WON' | 'LOS
 const stageClasses: Record<TenderStage | ProspectStage, string> = {
   IDENTIFIED: 'bg-surface-subtle text-fg-muted',
   NEW:        'bg-surface-subtle text-fg-muted',
-  QUALIFYING: 'bg-info/10 text-info',
-  QUALIFIED:  'bg-info/10 text-info',
-  BIDDING:    'bg-primary/10 text-primary',
-  ENGAGED:    'bg-primary/10 text-primary',
-  SUBMITTED:  'bg-accent/10 text-accent',
-  PROPOSAL:   'bg-accent/10 text-accent',
-  WON:        'bg-success/10 text-success',
-  LOST:       'bg-danger/10 text-danger',
+  QUALIFYING: 'bg-info-subtle text-info-strong',
+  QUALIFIED:  'bg-info-subtle text-info-strong',
+  BIDDING:    'bg-primary-subtle text-primary-active',
+  ENGAGED:    'bg-primary-subtle text-primary-active',
+  SUBMITTED:  'bg-accent-subtle text-accent-hover',
+  PROPOSAL:   'bg-accent-subtle text-accent-hover',
+  WON:        'bg-success-subtle text-success-strong',
+  LOST:       'bg-danger-subtle text-danger-strong',
 }
 
 export interface StagePillProps {

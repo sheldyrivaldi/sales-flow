@@ -1,7 +1,9 @@
 import { useState, useRef, useId } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import { inputBase } from './Input'
+import { useFloatingPosition } from '../../lib/useFloatingPosition'
 
 export interface ComboboxOption {
   label: string
@@ -32,6 +34,11 @@ export default function Combobox({
   const [activeIndex, setActiveIndex] = useState(0)
   const listboxId = useId()
   const inputRef = useRef<HTMLInputElement>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  // Portaled + fixed-positioned (see useFloatingPosition) so the listbox
+  // isn't clipped by an ancestor's overflow (e.g. a Modal's scrollable body)
+  // the way a plain `absolute` dropdown would be.
+  const pos = useFloatingPosition(wrapperRef, open, 'start')
 
   const selected = options.find((o) => o.value === value)
   const displayQuery = open ? query : (selected?.label ?? '')
@@ -70,7 +77,7 @@ export default function Combobox({
   }
 
   return (
-    <div className="relative">
+    <div ref={wrapperRef} className="relative">
       <div className="relative">
         <input
           ref={inputRef}
@@ -104,29 +111,39 @@ export default function Combobox({
         />
       </div>
 
-      {open && filtered.length > 0 && (
-        <ul
-          id={listboxId}
-          role="listbox"
-          className="absolute z-50 mt-1 w-full bg-surface border border-line rounded-btn shadow-subtle overflow-auto max-h-52 py-1"
-        >
-          {filtered.map((opt, i) => (
-            <li
-              key={opt.value}
-              id={`${listboxId}-${i}`}
-              role="option"
-              aria-selected={opt.value === value}
-              onMouseDown={() => choose(opt)}
-              className={cn(
-                'px-3 py-2 text-body cursor-pointer',
-                i === activeIndex ? 'bg-surface-subtle text-fg' : 'text-fg hover:bg-surface-subtle'
-              )}
-            >
-              {opt.label}
-            </li>
-          ))}
-        </ul>
-      )}
+      {open &&
+        filtered.length > 0 &&
+        pos &&
+        createPortal(
+          <ul
+            id={listboxId}
+            role="listbox"
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              left: pos.left,
+              width: wrapperRef.current?.getBoundingClientRect().width,
+            }}
+            className="z-[9000] bg-surface border border-line rounded-btn shadow-lg overflow-auto max-h-52 py-1"
+          >
+            {filtered.map((opt, i) => (
+              <li
+                key={opt.value}
+                id={`${listboxId}-${i}`}
+                role="option"
+                aria-selected={opt.value === value}
+                onMouseDown={() => choose(opt)}
+                className={cn(
+                  'px-3 py-2 text-body cursor-pointer',
+                  i === activeIndex ? 'bg-surface-subtle text-fg' : 'text-fg hover:bg-surface-subtle'
+                )}
+              >
+                {opt.label}
+              </li>
+            ))}
+          </ul>,
+          document.body
+        )}
     </div>
   )
 }

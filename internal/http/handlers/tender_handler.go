@@ -35,7 +35,10 @@ func (h *TenderHandler) SetEmitter(e *telemetry.Emitter) { h.emit = e }
 
 // List handles GET /api/tenders
 func (h *TenderHandler) List(c echo.Context) error {
-	f := domain.TenderFilter{}
+	// Hasil crawling yang belum direview hidup HANYA di Penemuan AI
+	// (GET /api/discovery/inbox) — menu Tender baru menampilkannya setelah
+	// diterima/dipromosikan oleh manusia.
+	f := domain.TenderFilter{ExcludeInbox: true}
 
 	if v := c.QueryParam("status"); v != "" {
 		s := domain.TenderStatus(v)

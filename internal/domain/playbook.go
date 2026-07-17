@@ -71,4 +71,7 @@ type PlaybookRepository interface {
 	// GetLatestVersion returns the highest existing version for a target, or
 	// 0 if none exists yet (so the caller's next version is 0+1 = 1).
 	GetLatestVersion(ctx context.Context, targetType, targetID string) (int, error)
+	// ListByTargetType returns every playbook row of one target_type, newest
+	// first — dipakai menu Playbooks untuk daftar playbook custom mandiri.
+	ListByTargetType(ctx context.Context, targetType string) ([]Playbook, error)
 }

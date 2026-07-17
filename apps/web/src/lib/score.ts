@@ -34,12 +34,18 @@ export function actionColor(action: RecommendedAction): Tone {
   }
 }
 
-/** Utility classes Tailwind untuk sebuah tone (pakai token, bukan hex). */
+/** Utility classes Tailwind untuk sebuah tone — record statis (bukan template
+ *  string) supaya Tailwind bisa melihat nama class lengkap saat scan source.
+ *  Soft badge memakai ramp subtle/strong dari tokens.css agar teks tetap
+ *  kontras di atas tint (mis. amber-800 di atas amber-50, bukan amber-500). */
+const toneClassMap: Record<Tone, ToneClasses> = {
+  success: { text: 'text-success-strong', bg: 'bg-success', bgSoft: 'bg-success-subtle', border: 'border-success-border' },
+  warning: { text: 'text-warning-strong', bg: 'bg-warning', bgSoft: 'bg-warning-subtle', border: 'border-warning-border' },
+  info:    { text: 'text-info-strong',    bg: 'bg-info',    bgSoft: 'bg-info-subtle',    border: 'border-info-border' },
+  danger:  { text: 'text-danger-strong',  bg: 'bg-danger',  bgSoft: 'bg-danger-subtle',  border: 'border-danger-border' },
+  accent:  { text: 'text-accent-hover',   bg: 'bg-accent',  bgSoft: 'bg-accent-subtle',  border: 'border-accent' },
+}
+
 export function toneClasses(tone: Tone): ToneClasses {
-  return {
-    text:   `text-${tone}`,
-    bg:     `bg-${tone}`,
-    bgSoft: `bg-${tone}/10`,
-    border: `border-${tone}`,
-  }
+  return toneClassMap[tone]
 }

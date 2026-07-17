@@ -1,0 +1,149 @@
+/* ════════════════════════════════════════════════════════════════════
+   ANIMATIONS — centralized keyframes + utility classes.
+
+   Prinsip: halus, cepat, fungsional. Semua durasi 150–300ms kecuali
+   efek ambient (pulse/shimmer). Non-esensial dimatikan total di bawah
+   prefers-reduced-motion.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Toast ── */
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(24px); }
+}
+@keyframes toast-progress {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+@keyframes toast-shake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-4px); }
+  40%      { transform: translateX(4px); }
+  60%      { transform: translateX(-2px); }
+  80%      { transform: translateX(2px); }
+}
+/* Stroke draw-in untuk ikon check (SVG dengan pathLength=1). */
+@keyframes stroke-draw {
+  from { stroke-dashoffset: 1; }
+  to   { stroke-dashoffset: 0; }
+}
+
+/* ── Overlay (modal / drawer) ── */
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes drawer-in-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes drawer-in-left {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+/* ── Page / route transition ── */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Loading ── */
+@keyframes skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30%           { opacity: 1;   transform: translateY(-3px); }
+}
+
+/* ── AI ambient ── */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 4px 14px rgba(20, 184, 166, 0.35); }
+  50%      { box-shadow: 0 4px 20px rgba(20, 184, 166, 0.55); }
+}
+
+/* ── Utility classes ── */
+@layer utilities {
+  .animate-modal-in    { animation: modal-in 220ms cubic-bezier(0.16, 1, 0.3, 1); }
+  .animate-backdrop-in { animation: backdrop-in 200ms ease-out; }
+  .animate-drawer-in-right { animation: drawer-in-right 250ms cubic-bezier(0.16, 1, 0.3, 1); }
+  .animate-drawer-in-left  { animation: drawer-in-left 250ms cubic-bezier(0.16, 1, 0.3, 1); }
+  .animate-page-enter  { animation: page-enter 250ms ease-out; }
+  .animate-toast-shake { animation: toast-shake 400ms ease-in-out 250ms; }
+  .animate-pulse-glow  { animation: pulse-glow 2.4s ease-in-out infinite; }
+
+  /* Hover lift untuk card/row interaktif. */
+  .hover-lift {
+    transition: transform 200ms ease, box-shadow 200ms ease;
+  }
+  .hover-lift:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-pop);
+  }
+
+  /* Skeleton shimmer — gradasi slate berjalan. */
+  .skeleton-shimmer {
+    background: linear-gradient(
+      90deg,
+      var(--color-surface-subtle) 25%,
+      var(--color-line) 50%,
+      var(--color-surface-subtle) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.6s ease-in-out infinite;
+  }
+
+  /* Titik-titik mengetik untuk respons AI. */
+  .typing-dot {
+    animation: typing-dot 1.2s ease-in-out infinite;
+  }
+  .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+  .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+  /* Latar gradasi AI (emerald → teal → cyan). */
+  .bg-ai-gradient {
+    background-image: var(--gradient-ai);
+  }
+
+  /* Scrollbar tipis & kalem untuk board/panel yang bisa digulir. */
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-strong) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: var(--color-line-strong);
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: var(--color-fg-subtle);
+  }
+}
+
+/* ── Reduced motion: matikan semua animasi non-esensial ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

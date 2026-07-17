@@ -61,3 +61,16 @@ func (r *PlaybookRepo) GetLatestVersion(ctx context.Context, targetType, targetI
 	}
 	return *maxVersion, nil
 }
+
+// ListByTargetType returns every playbook row of one target_type, newest
+// first (created_at DESC) — service memilih versi terbaru per target.
+func (r *PlaybookRepo) ListByTargetType(ctx context.Context, targetType string) ([]domain.Playbook, error) {
+	var items []domain.Playbook
+	if err := r.db.WithContext(ctx).
+		Where("target_type = ?", targetType).
+		Order("created_at DESC").
+		Find(&items).Error; err != nil {
+		return nil, fmt.Errorf("playbook.ListByTargetType: %w", err)
+	}
+	return items, nil
+}

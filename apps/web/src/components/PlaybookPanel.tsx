@@ -1,14 +1,23 @@
-import { useState } from 'react'
-import { Sparkles, Copy, Download } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { Sparkles, Copy, Download, Presentation, SendHorizonal, Upload } from 'lucide-react'
 
 import Badge from './ui/Badge'
 import Button from './ui/Button'
 import Select from './ui/Select'
+import Input from './ui/Input'
 import AiCallout from './ui/AiCallout'
 import { formatRelative } from '../lib/format'
 import { toast } from '../lib/toast'
 import { playbookToMarkdown } from '../lib/playbookFormat'
-import { usePlaybooks, useGeneratePlaybook } from '../api/playbooks'
+import { exportPlaybookPpt } from '../lib/exportPlaybookPpt'
+import { useAIBusy, AI_MUTATION_KEYS } from '../lib/aiMutation'
+import PlaybookGantt from './playbooks/PlaybookGantt'
+import {
+  usePlaybooks,
+  useGeneratePlaybook,
+  useGeneratePlaybookFromDocument,
+  useRefinePlaybook,
+} from '../api/playbooks'
 import type { PlaybookTargetType, Playbook } from '../api/playbooks'
 
 export interface PlaybookPanelProps {
@@ -26,7 +35,7 @@ function downloadMarkdown(filename: string, markdown: string) {
   URL.revokeObjectURL(url)
 }
 
-function PlaybookSections({ playbook }: { playbook: Playbook }) {
+export function PlaybookSections({ playbook }: { playbook: Playbook }) {
   const c = playbook.content
   return (
     <div className="flex flex-col gap-3">
@@ -58,12 +67,16 @@ function PlaybookSections({ playbook }: { playbook: Playbook }) {
         </ul>
       </section>
       <section>
-        <h4 className="text-caption font-semibold text-fg-muted uppercase tracking-wide mb-1">Timeline</h4>
-        <ol className="list-decimal pl-4 text-body text-fg space-y-0.5">
-          {c.timeline.map((t, i) => (
-            <li key={i}>{t}</li>
-          ))}
-        </ol>
+        <h4 className="text-caption font-semibold text-fg-muted uppercase tracking-wide mb-1">Rencana Kerja (Timeline)</h4>
+        {c.timeline_plan && c.timeline_plan.length > 0 ? (
+          <PlaybookGantt items={c.timeline_plan} />
+        ) : (
+          <ol className="list-decimal pl-4 text-body text-fg space-y-0.5">
+            {c.timeline.map((t, i) => (
+              <li key={i}>{t}</li>
+            ))}
+          </ol>
+        )}
       </section>
       <section>
         <h4 className="text-caption font-semibold text-fg-muted uppercase tracking-wide mb-1">Risiko</h4>
@@ -92,15 +105,35 @@ function PlaybookSections({ playbook }: { playbook: Playbook }) {
 export default function PlaybookPanel({ targetType, targetId }: PlaybookPanelProps) {
   const { data: playbooks, isLoading } = usePlaybooks(targetType, targetId)
   const generate = useGeneratePlaybook(targetType)
+  const fromDocument = useGeneratePlaybookFromDocument(targetType)
+  const refine = useRefinePlaybook()
   const [compareId, setCompareId] = useState<string>('')
+  const [instruction, setInstruction] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  async function handleGenerate() {
-    try {
-      await generate.mutateAsync(targetId)
-      toast.success('Playbook berhasil dibuat.')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Generate playbook gagal, coba lagi nanti.')
+  const aiBusy = useAIBusy(AI_MUTATION_KEYS.playbook, targetId)
+  const busy = generate.isPending || fromDocument.isPending || refine.isPending || aiBusy
+
+  // Toast sukses/gagal ditangani MutationCache global (lihat main.tsx) —
+  // tetap muncul meski user sudah pindah halaman saat AI selesai.
+  function handleGenerate() {
+    generate.mutate(targetId)
+  }
+
+  function handleFromDocument(file: File | undefined) {
+    if (!file) return
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Ukuran dokumen maksimal 10 MB.')
+      return
     }
+    fromDocument.mutate({ id: targetId, file })
+  }
+
+  function handleRefine(latest: Playbook) {
+    const text = instruction.trim()
+    if (!text) return
+    refine.mutate({ playbookId: latest.id, instruction: text, targetId })
+    setInstruction('')
   }
 
   function handleCopy(playbook: Playbook) {
@@ -129,17 +162,41 @@ export default function PlaybookPanel({ targetType, targetId }: PlaybookPanelPro
       <AiCallout title="Belum ada playbook">
         <p className="mt-1 text-body text-fg-muted">
           Generate playbook untuk mendapatkan strategi terstruktur: ringkasan, value proposition,
-          stakeholder, strategi, timeline, risiko, dan next actions.
+          stakeholder, strategi, timeline, risiko, dan next actions — atau susun dari dokumen yang
+          sudah kamu punya (proposal lama, playbook existing, notulen strategi).
         </p>
-        <div className="mt-3">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".pdf"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(e) => {
+            handleFromDocument(e.target.files?.[0])
+            e.target.value = ''
+          }}
+        />
+        <div className="mt-3 flex flex-wrap gap-2">
           <Button
             size="sm"
             variant="secondary"
             leftIcon={<Sparkles className="w-3.5 h-3.5" />}
             loading={generate.isPending}
+            disabled={busy}
             onClick={handleGenerate}
           >
             Generate Playbook
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            leftIcon={<Upload className="w-3.5 h-3.5" />}
+            loading={fromDocument.isPending}
+            disabled={busy}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Dari Dokumen (PDF)
           </Button>
         </div>
       </AiCallout>
@@ -166,6 +223,16 @@ export default function PlaybookPanel({ targetType, targetId }: PlaybookPanelPro
           <Button size="sm" variant="ghost" leftIcon={<Download className="w-3.5 h-3.5" />} onClick={() => handleExport(latest)}>
             Export
           </Button>
+          {targetType === 'event' && (
+            <Button
+              size="sm"
+              variant="ghost"
+              leftIcon={<Presentation className="w-3.5 h-3.5" />}
+              onClick={() => void exportPlaybookPpt(latest.content, `Playbook Event`).catch(() => toast.error('Ekspor PPT gagal.'))}
+            >
+              PPT
+            </Button>
+          )}
         </div>
       </div>
 
@@ -182,16 +249,74 @@ export default function PlaybookPanel({ targetType, targetId }: PlaybookPanelPro
         )}
       </div>
 
+      {/* Revisi via prompt — bagian yang tidak disinggung dipertahankan;
+          hasil selalu dipersist sebagai versi baru. */}
+      <div className="flex flex-col gap-1.5 pt-2 border-t border-accent/10">
+        <label htmlFor={`refine-${targetId}`} className="text-caption font-semibold text-fg-muted uppercase tracking-wide">
+          Revisi dengan prompt
+        </label>
+        <div className="flex gap-2">
+          <Input
+            id={`refine-${targetId}`}
+            value={instruction}
+            onChange={(e) => setInstruction(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                handleRefine(latest)
+              }
+            }}
+            disabled={busy}
+            placeholder="mis. tambahkan mitigasi risiko keamanan data, persingkat timeline jadi 3 bulan…"
+          />
+          <Button
+            size="md"
+            loading={refine.isPending}
+            disabled={busy || !instruction.trim()}
+            onClick={() => handleRefine(latest)}
+            leftIcon={<SendHorizonal className="w-3.5 h-3.5" />}
+            aria-label="Kirim instruksi revisi"
+          >
+            Revisi
+          </Button>
+        </div>
+      </div>
+
       <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-accent/10">
-        <Button
-          size="sm"
-          variant="ghost"
-          leftIcon={<Sparkles className="w-3.5 h-3.5" />}
-          loading={generate.isPending}
-          onClick={handleGenerate}
-        >
-          Generate versi baru
-        </Button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            className="sr-only"
+            tabIndex={-1}
+            aria-hidden="true"
+            onChange={(e) => {
+              handleFromDocument(e.target.files?.[0])
+              e.target.value = ''
+            }}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            leftIcon={<Sparkles className="w-3.5 h-3.5" />}
+            loading={generate.isPending}
+            disabled={busy}
+            onClick={handleGenerate}
+          >
+            Generate versi baru
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            leftIcon={<Upload className="w-3.5 h-3.5" />}
+            loading={fromDocument.isPending}
+            disabled={busy}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Dari Dokumen
+          </Button>
+        </div>
 
         {olderVersions.length > 0 && (
           <div className="flex items-center gap-2">

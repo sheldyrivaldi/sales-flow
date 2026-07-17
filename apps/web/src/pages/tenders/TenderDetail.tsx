@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router'
-import { ChevronRight, Sparkles, ExternalLink, AlertTriangle } from 'lucide-react'
+import { ChevronRight, Sparkles, ExternalLink, AlertTriangle, FileText } from 'lucide-react'
 
 import Tabs, { TabPanel } from '../../components/ui/Tabs'
 import { StagePill } from '../../components/ui/Badge'
@@ -13,6 +13,8 @@ import EmptyState from '../../components/ui/EmptyState'
 import Skeleton, { SkeletonText } from '../../components/ui/Skeleton'
 import AiScorePanel from '../../components/AiScorePanel'
 import PlaybookPanel from '../../components/PlaybookPanel'
+import DocChecklistCard from '../../components/tenders/DocChecklistCard'
+import ProposalDraftDrawer from '../../components/tenders/ProposalDraftDrawer'
 import TenderFormDrawer from './TenderFormDrawer'
 
 import { toast } from '../../lib/toast'
@@ -135,6 +137,7 @@ export default function TenderDetail() {
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('ringkasan')
   const [editOpen, setEditOpen] = useState(false)
+  const [proposalOpen, setProposalOpen] = useState(false)
   const [outcomeOpen, setOutcomeOpen] = useState(false)
   const [outcomeResult, setOutcomeResult] = useState<'WON' | 'LOST'>('WON')
   const [outcomeNotes, setOutcomeNotes] = useState('')
@@ -161,7 +164,7 @@ export default function TenderDetail() {
         result: outcomeResult,
         notes: outcomeNotes || undefined,
       })
-      toast.success(`Tender ditandai ${outcomeResult}. AI akan belajar dari hasil ini.`)
+      toast.success(`Tender ditandai ${outcomeResult} dan hasilnya dipelajari AI.`)
       setOutcomeOpen(false)
       setOutcomeNotes('')
     } catch {
@@ -233,6 +236,15 @@ export default function TenderDetail() {
               Playbook
             </Button>
 
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<FileText className="w-3.5 h-3.5" />}
+              onClick={() => setProposalOpen(true)}
+            >
+              Generate Proposal
+            </Button>
+
             {/* Status change */}
             {nextStatuses.length > 0 && (
               <div className="flex gap-1">
@@ -282,8 +294,9 @@ export default function TenderDetail() {
 
         <TabPanel id="analisa">
           {activeTab === 'analisa' && (
-            <div className="max-w-xl">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
               <AiScorePanel targetType="tender" targetId={tender.id} tender={tender} />
+              <DocChecklistCard tenderId={tender.id} />
             </div>
           )}
         </TabPanel>
@@ -312,6 +325,14 @@ export default function TenderDetail() {
         onClose={() => setEditOpen(false)}
         tender={tender}
         onSaved={() => setEditOpen(false)}
+      />
+
+      {/* Draf Proposal */}
+      <ProposalDraftDrawer
+        open={proposalOpen}
+        onClose={() => setProposalOpen(false)}
+        tenderId={tender.id}
+        tenderTitle={tender.title}
       />
 
       {/* Outcome Modal */}

@@ -41,7 +41,7 @@ export default function Modal({
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Overlay */}
       <div
-        className="absolute inset-0 bg-fg/40"
+        className="absolute inset-0 bg-fg/40 animate-backdrop-in"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -53,7 +53,7 @@ export default function Modal({
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
         className={cn(
-          'relative z-10 w-full bg-surface rounded-card shadow-subtle flex flex-col max-h-[90vh]',
+          'relative z-10 w-full bg-surface rounded-card shadow-lg flex flex-col max-h-[90vh] animate-modal-in',
           sizeClasses[size],
           className
         )}

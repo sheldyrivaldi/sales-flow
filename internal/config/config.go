@@ -9,10 +9,34 @@ import (
 )
 
 type Config struct {
-	Port                string
-	DatabaseURL         string
-	JWTSecret           string
-	HermesBaseURL       string
+	Port          string
+	DatabaseURL   string
+	JWTSecret     string
+	HermesBaseURL string
+	// HermesTuiBaseURL is the hermes-tui sidecar (official nousresearch/
+	// hermes-agent image running `hermes dashboard`) — a separate service
+	// from hermes-bridge/HermesBaseURL, see deploy/docker-compose.yml. Only
+	// the Go API talks to it; it has no published host port.
+	HermesTuiBaseURL string
+	// HermesTuiSessionToken authenticates outbound calls to hermes-tui's
+	// dashboard REST API (e.g. /api/cron/jobs, EP-12 crawl automation
+	// upsert) — sent as "Authorization: Bearer <token>". Must equal
+	// hermes-tui's own HERMES_DASHBOARD_SESSION_TOKEN env var (see
+	// deploy/docker-compose.yml); optional like ConfigEncKey — without it,
+	// the crawl-automation-in-Hermes feature just degrades to "not synced"
+	// rather than blocking anything.
+	HermesTuiSessionToken string
+	// CronTriggerSecret gates POST /internal/discovery/trigger — the
+	// callback the Hermes cron job (upserted on profile save, EP-12) hits to
+	// ask "run discovery now if due". A dedicated secret rather than reusing
+	// APIServerKey: this one gets embedded verbatim in the cron job's prompt
+	// text (persisted to a file in Hermes's own workspace), so a leak there
+	// shouldn't also compromise hermes-bridge's inbound auth.
+	CronTriggerSecret string
+	// InternalAPIBaseURL is how the Hermes cron job's callback (see
+	// CronTriggerSecret) reaches this API from inside hermes-tui's
+	// container — the compose-network DNS name, not the host-facing one.
+	InternalAPIBaseURL  string
 	APIServerKey        string
 	WorkspaceSessionKey string
 	SalesMCPToken       string
@@ -33,17 +57,21 @@ func Load() (*Config, error) {
 	_ = godotenv.Load() // .env opsional; abaikan bila tidak ada
 
 	cfg := &Config{
-		Port:                getEnv("PORT", "8080"),
-		DatabaseURL:         os.Getenv("DATABASE_URL"),
-		JWTSecret:           os.Getenv("JWT_SECRET"),
-		HermesBaseURL:       getEnv("HERMES_BASE_URL", "http://localhost:8642"),
-		APIServerKey:        os.Getenv("API_SERVER_KEY"),
-		WorkspaceSessionKey: os.Getenv("WORKSPACE_SESSION_KEY"),
-		SalesMCPToken:       os.Getenv("SALES_MCP_TOKEN"),
-		SeedAdminEmail:      os.Getenv("SEED_ADMIN_EMAIL"),
-		SeedAdminPassword:   os.Getenv("SEED_ADMIN_PASSWORD"),
-		UploadDir:           getEnv("UPLOAD_DIR", "./data/uploads"),
-		ConfigEncKey:        os.Getenv("CONFIG_ENC_KEY"),
+		Port:                  getEnv("PORT", "8080"),
+		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		JWTSecret:             os.Getenv("JWT_SECRET"),
+		HermesBaseURL:         getEnv("HERMES_BASE_URL", "http://localhost:8642"),
+		HermesTuiBaseURL:      getEnv("HERMES_TUI_BASE_URL", "http://hermes-tui:9119"),
+		HermesTuiSessionToken: os.Getenv("HERMES_DASHBOARD_SESSION_TOKEN"),
+		CronTriggerSecret:     os.Getenv("CRON_TRIGGER_SECRET"),
+		InternalAPIBaseURL:    getEnv("INTERNAL_API_BASE_URL", "http://api:8080"),
+		APIServerKey:          os.Getenv("API_SERVER_KEY"),
+		WorkspaceSessionKey:   os.Getenv("WORKSPACE_SESSION_KEY"),
+		SalesMCPToken:         os.Getenv("SALES_MCP_TOKEN"),
+		SeedAdminEmail:        os.Getenv("SEED_ADMIN_EMAIL"),
+		SeedAdminPassword:     os.Getenv("SEED_ADMIN_PASSWORD"),
+		UploadDir:             getEnv("UPLOAD_DIR", "./data/uploads"),
+		ConfigEncKey:          os.Getenv("CONFIG_ENC_KEY"),
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err

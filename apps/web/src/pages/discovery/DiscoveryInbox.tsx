@@ -137,10 +137,12 @@ export default function DiscoveryInbox() {
 
   async function handleRun() {
     try {
-      await runMutation.mutateAsync()
-      toast.success('Pencarian AI dimulai.')
-    } catch {
-      toast.error('Gagal memulai pencarian AI.')
+      const run = await runMutation.mutateAsync()
+      if (run.status === 'pending' || run.status === 'running') {
+        toast.success('Crawling tender dimulai, hasil masuk otomatis saat selesai.')
+      }
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : 'Gagal memulai crawling tender.')
     }
   }
 
@@ -178,7 +180,7 @@ export default function DiscoveryInbox() {
     setPendingId(rejectTarget.id)
     try {
       await reviewMutation.mutateAsync({ id: rejectTarget.id, reason: rejectReason || undefined })
-      toast.success('Tender ditolak. AI akan belajar dari alasan ini.')
+      toast.success('Tender ditolak dan alasannya dipelajari AI.')
     } catch {
       toast.error('Gagal menolak tender.')
     } finally {
@@ -190,7 +192,7 @@ export default function DiscoveryInbox() {
 
   const statusText = latestRun
     ? isRunning
-      ? 'Sedang berjalan…'
+      ? 'Crawling sedang berjalan — bisa memakan beberapa menit, kamu boleh tinggal ke halaman lain.'
       : `Terakhir: ${formatRelative(latestRun.finished_at ?? latestRun.started_at)} • ${latestRun.found_count} baru`
     : 'Belum pernah dijalankan'
 
@@ -200,17 +202,17 @@ export default function DiscoveryInbox() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-h2 font-semibold text-fg flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-accent" /> Penemuan AI
+            <Sparkles className="w-5 h-5 text-accent" /> Radar Tender
           </h1>
           <p className="text-caption text-fg-muted mt-0.5">{statusText}</p>
         </div>
         <Button
           leftIcon={<Sparkles className="w-4 h-4" />}
           loading={runMutation.isPending || isRunning}
-          disabled={!profileConfigured}
+          disabled={!profileConfigured || isRunning}
           onClick={handleRun}
         >
-          Jalankan pencarian
+          {isRunning ? 'Crawling berjalan…' : 'Jalankan crawling'}
         </Button>
       </div>
 

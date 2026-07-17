@@ -14,7 +14,16 @@ dependencies = [
     "uvicorn[standard]==0.49.0",
 
     # Pydantic v2 — dipakai untuk schema request/response.
-    "pydantic==2.11.7",
+    # Harus match versi yang dituntut hermes-agent (transitive, exact-pinned
+    # olehnya) — cek tiap kali tag hermes-agent di atas naik, kalau tidak
+    # `pip install` gagal dengan ResolutionImpossible.
+    "pydantic==2.13.4",
+
+    # Renders PDF pages to images for vision-based document extraction (EP-13
+    # PDF ingest) — lets the LLM read the actual PDF (tables, layout) instead
+    # of Go-side text extraction, which mangles table structure. Pure-wheel,
+    # no system poppler/etc. dependency needed.
+    "pypdfium2==5.12.0",
 ]
 
 [project.optional-dependencies]

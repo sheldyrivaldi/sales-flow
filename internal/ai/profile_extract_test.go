@@ -1,91 +1,116 @@
 package ai
 
 import (
-	"bytes"
-	"fmt"
-	"os"
-	"path/filepath"
+	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+
+	"salespilot/internal/hermes"
 )
 
-// buildMinimalPDF assembles a byte-accurate minimal single-page PDF (no
-// external tool/library needed to generate it — just careful offset
-// bookkeeping) whose content stream shows contentText via the Tj operator.
-// Pass contentText="" to produce a PDF with no visible text (empty content
-// stream) for the "no extractable text" test case.
-func buildMinimalPDF(contentText string) []byte {
-	var buf bytes.Buffer
-	var offsets [6]int // index 1..5 used (object numbers)
-
-	buf.WriteString("%PDF-1.4\n")
-
-	writeObj := func(num int, body string) {
-		offsets[num] = buf.Len()
-		fmt.Fprintf(&buf, "%d 0 obj\n%s\nendobj\n", num, body)
-	}
-
-	writeObj(1, "<< /Type /Catalog /Pages 2 0 R >>")
-	writeObj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
-	writeObj(3, "<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /MediaBox [0 0 200 200] /Contents 5 0 R >>")
-	writeObj(4, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
-
-	var content string
-	if contentText != "" {
-		content = fmt.Sprintf("BT /F1 24 Tf 10 100 Td (%s) Tj ET", contentText)
-	} else {
-		content = "BT ET"
-	}
-	streamBody := fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(content), content)
-	writeObj(5, streamBody)
-
-	xrefOffset := buf.Len()
-	buf.WriteString("xref\n0 6\n0000000000 65535 f \n")
-	for i := 1; i <= 5; i++ {
-		fmt.Fprintf(&buf, "%010d 00000 n \n", offsets[i])
-	}
-	buf.WriteString("trailer\n<< /Size 6 /Root 1 0 R >>\n")
-	fmt.Fprintf(&buf, "startxref\n%d\n%%%%EOF", xrefOffset)
-
-	return buf.Bytes()
+// documentStub implements hermes.Client (minimally, all "not implemented"
+// except what a given test needs) plus hermes.DocumentExtractor — the
+// optional capability Extractor.Extract type-asserts for.
+type documentStub struct {
+	generateJSONFromDocument func(ctx context.Context, prompt, filename string, fileBytes []byte, schema any, sk hermes.SessionKey) (json.RawMessage, error)
 }
 
-func writeTempPDF(t *testing.T, data []byte) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "fixture.pdf")
-	if err := os.WriteFile(path, data, 0o644); err != nil {
-		t.Fatalf("write fixture: %v", err)
-	}
-	return path
+var _ hermes.Client = (*documentStub)(nil)
+var _ hermes.DocumentExtractor = (*documentStub)(nil)
+
+func (s *documentStub) Chat(_ context.Context, _ hermes.ChatRequest) (hermes.ChatResponse, error) {
+	return hermes.ChatResponse{}, errors.New("not implemented")
 }
 
-func TestExtractText_ExtractsKnownText(t *testing.T) {
-	const marker = "Rahasia Unik 42"
-	path := writeTempPDF(t, buildMinimalPDF(marker))
+func (s *documentStub) ChatStream(_ context.Context, _ hermes.ChatRequest) (<-chan hermes.Chunk, error) {
+	return nil, errors.New("not implemented")
+}
 
-	text, err := ExtractText(path)
+func (s *documentStub) GenerateJSON(_ context.Context, _ string, _ any, _ hermes.SessionKey) (json.RawMessage, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (s *documentStub) Health(_ context.Context) (hermes.Capabilities, error) {
+	return hermes.Capabilities{}, errors.New("not implemented")
+}
+
+func (s *documentStub) Configure(_ context.Context, _ hermes.ProviderConfig) error {
+	return errors.New("not implemented")
+}
+
+func (s *documentStub) ResetMemory(_ context.Context, _ hermes.SessionKey) error {
+	return errors.New("not implemented")
+}
+
+func (s *documentStub) GenerateJSONFromDocument(ctx context.Context, prompt, filename string, fileBytes []byte, schema any, sk hermes.SessionKey) (json.RawMessage, error) {
+	return s.generateJSONFromDocument(ctx, prompt, filename, fileBytes, schema, sk)
+}
+
+func TestBuildExtractPrompt_ContainsSchemaAndInstructions(t *testing.T) {
+	prompt := buildExtractPrompt()
+	for _, want := range []string{
+		"company_name", "portfolio_refs", "nogo_custom", "decision_maker_roles",
+		"JANGAN mengarang", "JANGAN mencoba mencocokkan ke daftar preset",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestExtractor_Extract_SendsPDFBytesAndFilename(t *testing.T) {
+	const wantFilename = "profile.pdf"
+	wantBytes := []byte("%PDF-1.4 fake content")
+
+	stub := &documentStub{
+		generateJSONFromDocument: func(_ context.Context, _ string, filename string, fileBytes []byte, schema any, _ hermes.SessionKey) (json.RawMessage, error) {
+			if filename != wantFilename {
+				t.Errorf("filename = %q, want %q", filename, wantFilename)
+			}
+			if string(fileBytes) != string(wantBytes) {
+				t.Errorf("fileBytes = %q, want %q (the raw PDF must be sent, not extracted text)", fileBytes, wantBytes)
+			}
+			raw := []byte(`{"company_name":"PT Contoh","one_liner":"Kami membangun aplikasi","service_categories":["Web App"],"tech_stack":["Go"],"products":[],"vision":"","mission":"","portfolio_refs":[],"keywords":[],"negative_keywords":[],"nogo_custom":[],"target":{"countries":[],"industries":[],"procurement_types":[],"buyer_size_note":"","document_languages":[],"work_model":"","onsite_limit_note":"","decision_maker_roles":[]}}`)
+			if err := json.Unmarshal(raw, schema); err != nil {
+				t.Fatalf("unmarshal into schema: %v", err)
+			}
+			return raw, nil
+		},
+	}
+
+	extractor := NewExtractor(stub, "sk-test")
+	draft, err := extractor.Extract(context.Background(), wantBytes, wantFilename)
 	if err != nil {
-		t.Fatalf("ExtractText: unexpected error: %v", err)
+		t.Fatalf("Extract: unexpected error: %v", err)
 	}
-	if !strings.Contains(text, marker) {
-		t.Fatalf("extracted text %q does not contain marker %q", text, marker)
-	}
-}
-
-func TestExtractText_NoTextLayer(t *testing.T) {
-	path := writeTempPDF(t, buildMinimalPDF(""))
-
-	_, err := ExtractText(path)
-	if err != ErrNoExtractableText {
-		t.Fatalf("err = %v, want ErrNoExtractableText", err)
+	if draft.CompanyName != "PT Contoh" {
+		t.Errorf("CompanyName = %q, want %q", draft.CompanyName, "PT Contoh")
 	}
 }
 
-func TestExtractText_CorruptFile(t *testing.T) {
-	path := writeTempPDF(t, []byte("this is not a pdf at all, just plain garbage bytes"))
+func TestExtractor_Extract_HermesError(t *testing.T) {
+	stub := &documentStub{
+		generateJSONFromDocument: func(_ context.Context, _ string, _ string, _ []byte, _ any, _ hermes.SessionKey) (json.RawMessage, error) {
+			return nil, errors.New("hermes down")
+		},
+	}
 
-	_, err := ExtractText(path)
+	extractor := NewExtractor(stub, "sk-test")
+	_, err := extractor.Extract(context.Background(), []byte("%PDF-1.4 fake"), "profile.pdf")
 	if err == nil {
-		t.Fatal("expected error for corrupt file, got nil")
+		t.Fatal("Extract should return an error when Hermes fails, got nil")
+	}
+}
+
+func TestExtractor_Extract_ClientWithoutDocumentSupport(t *testing.T) {
+	// stubHermesClient (scoring_test.go, same package) only implements the
+	// base hermes.Client — Extract must degrade with a clear error instead
+	// of panicking on the failed type assertion.
+	extractor := NewExtractor(&stubHermesClient{}, "sk-test")
+	_, err := extractor.Extract(context.Background(), []byte("%PDF-1.4 fake"), "profile.pdf")
+	if err == nil {
+		t.Fatal("Extract should return an error when the client doesn't support DocumentExtractor")
 	}
 }

@@ -105,6 +105,11 @@ type TenderFilter struct {
 	// ST-12.4.1 "Discovery Inbox". When true, Origin/Status filters above are
 	// ignored (inbox semantics own them).
 	OnlyInbox bool
+	// ExcludeInbox is OnlyInbox's complement: hides discovery-origin tenders
+	// that are still awaiting review. Set by the main tender-list endpoint so
+	// crawl results live ONLY in "Penemuan AI" until a human accepts them —
+	// only then do they appear in the Tender menu.
+	ExcludeInbox bool
 }
 
 type TenderRepository interface {

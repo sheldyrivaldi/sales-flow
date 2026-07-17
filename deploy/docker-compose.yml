@@ -65,6 +65,29 @@ services:
     ports:
       - "8642:8642"
 
+  hermes-tui:
+    build:
+      context: ../services/hermes-tui
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ../.env
+        required: false
+    volumes:
+      # Shares the SAME named volume as hermes-bridge (above), on purpose: a
+      # device-code login done via the dashboard must be visible to chat
+      # too, and vice versa — one Hermes workspace, two front doors. Mounted
+      # at a DIFFERENT path than hermes-bridge's /root/.hermes because the
+      # official hermes-agent image hardcodes HERMES_HOME=/opt/data (see
+      # its baked-in image ENV) — same underlying volume, different
+      # mountpoint per container, which Docker supports natively.
+      - hermes-memory:/opt/data
+    # Deliberately no published host port — reachable only from `api` over
+    # the compose network (see Go's HERMES_TUI_BASE_URL, default
+    # http://hermes-tui:9119). Go is the sole path in, same double-isolation
+    # principle as hermes-bridge, but enforced from the start here rather
+    # than as a later hardening step.
+
 volumes:
   pgdata:
   uploads:

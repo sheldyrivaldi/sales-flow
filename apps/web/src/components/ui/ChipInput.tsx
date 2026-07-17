@@ -67,7 +67,10 @@ export default function ChipInput({
         {value.map((chip) => (
           <span
             key={chip}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-pill bg-primary/10 text-primary border border-primary text-caption font-medium"
+            // Neutral slate tags (not emerald): a wall of many free-form tags
+            // in the brand color reads as "everything is green". Reserve
+            // emerald for genuine accents; tags stay quiet chrome.
+            className="inline-flex items-center gap-1 pl-2.5 pr-1.5 py-0.5 rounded-md bg-surface-subtle text-fg border border-line text-caption font-medium"
           >
             {chip}
             {!disabled && (
@@ -75,7 +78,7 @@ export default function ChipInput({
                 type="button"
                 aria-label={`Hapus ${chip}`}
                 onClick={(e) => { e.stopPropagation(); removeChip(chip) }}
-                className="hover:text-primary-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary rounded-full"
+                className="text-fg-subtle hover:text-danger transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-danger rounded-full"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -117,8 +120,8 @@ export default function ChipInput({
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1',
                   'disabled:opacity-50 disabled:cursor-not-allowed',
                   selected
-                    ? 'bg-primary/10 text-primary border-primary'
-                    : 'bg-surface-subtle text-fg-muted border-line hover:border-primary/50 hover:text-fg'
+                    ? 'bg-primary-subtle text-primary-active border-primary-border'
+                    : 'bg-surface-subtle text-fg-muted border-line hover:border-primary-border hover:text-fg'
                 )}
               >
                 {preset}

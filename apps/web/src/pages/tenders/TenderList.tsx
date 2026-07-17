@@ -23,6 +23,7 @@ import {
 } from '../../api/tenders'
 import type { Tender, TenderFilters, TenderStatus, TenderApiAction, TenderOrigin } from '../../api/tenders'
 import TenderFormDrawer from './TenderFormDrawer'
+import ProposalDraftDrawer from '../../components/tenders/ProposalDraftDrawer'
 
 function deadlineTone(deadline: string | null): 'normal' | 'warning' | 'danger' {
   if (!deadline) return 'normal'
@@ -40,6 +41,7 @@ export default function TenderList() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editingTender, setEditingTender] = useState<Tender | undefined>()
   const [deleteTarget, setDeleteTarget] = useState<Tender | null>(null)
+  const [proposalTender, setProposalTender] = useState<Tender | null>(null)
 
   const { data, isLoading } = useTenders({ ...filters, page })
   const deleteMutation = useDeleteTender()
@@ -242,7 +244,7 @@ export default function TenderList() {
             <EmptyState
               icon={<FileSearch className="w-6 h-6" />}
               title="Belum ada tender"
-              description="Mulai tambahkan tender baru atau jalankan Penemuan AI."
+              description="Mulai tambahkan tender baru atau jalankan Radar Tender."
               action={
                 <Button size="sm" onClick={openCreate}>
                   + Tender Baru
@@ -258,6 +260,10 @@ export default function TenderList() {
             {
               label: 'Edit',
               onClick: () => openEdit(row),
+            },
+            {
+              label: 'Generate Proposal',
+              onClick: () => setProposalTender(row),
             },
             ...(row.origin === 'discovery' && row.status === 'IDENTIFIED'
               ? [{ label: '✨ Promote ke Pipeline', onClick: () => handlePromote(row) }]
@@ -289,6 +295,14 @@ export default function TenderList() {
         loading={deleteMutation.isPending}
         onConfirm={handleDelete}
         onCancel={() => setDeleteTarget(null)}
+      />
+
+      {/* Draf Proposal (kebab "Generate Proposal") */}
+      <ProposalDraftDrawer
+        open={!!proposalTender}
+        onClose={() => setProposalTender(null)}
+        tenderId={proposalTender?.id}
+        tenderTitle={proposalTender?.title}
       />
     </div>
   )

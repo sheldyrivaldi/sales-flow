@@ -12,6 +12,8 @@ import { cn } from '../../lib/cn'
 import { useEvent, useConvertEvent, EVENT_TYPE_LABELS, EVENT_STATUS_LABELS } from '../../api/events'
 import type { EventType, EventStatus } from '../../api/events'
 import EventFormDrawer from './EventFormDrawer'
+import EventAnalysisPanel from '../../components/events/EventAnalysisPanel'
+import PlaybookPanel from '../../components/PlaybookPanel'
 
 const TYPE_COLORS: Record<EventType, string> = {
   EXPO: 'bg-sky-100 text-sky-700',
@@ -129,6 +131,13 @@ export default function EventDetail() {
           </div>
         )}
       </div>
+
+      {/* Analisa peserta pasca-event: upload daftar peserta → kuadran + timeline */}
+      <EventAnalysisPanel eventId={event.id} />
+
+      {/* Playbook khusus event ini — bisa digenerate, dari dokumen, direvisi
+          via prompt, dan diekspor ke PPT */}
+      <PlaybookPanel targetType="event" targetId={event.id} />
 
       {/* Prospek dari event (placeholder — EP-07 akan mengisi list prospek tertaut) */}
       <div className="bg-surface border border-line rounded-card p-5">

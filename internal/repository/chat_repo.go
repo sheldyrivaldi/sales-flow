@@ -65,6 +65,22 @@ func (r *ChatRepo) UpdateConversation(ctx context.Context, c *domain.Conversatio
 	return nil
 }
 
+// DeleteConversation deletes the row only if it belongs to ownerID. Returns
+// gorm.ErrRecordNotFound if no matching row was deleted (not found, or
+// ownership mismatch) so the service can 404 rather than silently no-op.
+func (r *ChatRepo) DeleteConversation(ctx context.Context, id, ownerID string) error {
+	res := r.db.WithContext(ctx).
+		Where("id = ? AND owner_user_id = ?", id, ownerID).
+		Delete(&domain.Conversation{})
+	if res.Error != nil {
+		return fmt.Errorf("chat.DeleteConversation: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("chat.DeleteConversation: %w", gorm.ErrRecordNotFound)
+	}
+	return nil
+}
+
 func (r *ChatRepo) CreateMessage(ctx context.Context, m *domain.Message) error {
 	if err := r.db.WithContext(ctx).Create(m).Error; err != nil {
 		return fmt.Errorf("chat.CreateMessage: %w", err)

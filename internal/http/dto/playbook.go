@@ -38,3 +38,14 @@ func ToPlaybookResponse(p domain.Playbook) PlaybookResponse {
 type PlaybookListResponse struct {
 	Items []PlaybookResponse `json:"items"`
 }
+
+// PlaybookRefineRequest is the body of POST /api/playbooks/:id/refine —
+// instruksi bebas user untuk merevisi playbook (hasil = versi baru).
+type PlaybookRefineRequest struct {
+	Instruction string `json:"instruction" validate:"required"`
+}
+
+// PlaybookCustomRequest is the body of POST /api/playbooks/custom.
+type PlaybookCustomRequest struct {
+	Topic string `json:"topic" validate:"required"`
+}

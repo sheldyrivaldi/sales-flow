@@ -569,10 +569,10 @@ function OverlaySection() {
       </Row>
 
       <Row label="Toast — semua tone">
-        <Button size="sm" variant="primary" onClick={() => toast.success('Tender berhasil disimpan')}>Success</Button>
-        <Button size="sm" variant="danger" onClick={() => toast.error('Gagal menghubungi server')}>Error</Button>
-        <Button size="sm" variant="secondary" onClick={() => toast.warning('Deadline tinggal 2 hari')}>Warning</Button>
-        <Button size="sm" variant="ghost" onClick={() => toast.info('AI sedang menganalisa tender')}>Info</Button>
+        <Button size="sm" variant="primary" onClick={() => toast.success('Tender berhasil disimpan.')}>Success</Button>
+        <Button size="sm" variant="danger" onClick={() => toast.error('Gagal menghubungi server.')}>Error</Button>
+        <Button size="sm" variant="secondary" onClick={() => toast.warning('Deadline tinggal 2 hari.')}>Warning</Button>
+        <Button size="sm" variant="ghost" onClick={() => toast.info('AI sedang menganalisa tender.')}>Info</Button>
       </Row>
 
       <Row label="Confirmation dialog">
@@ -582,7 +582,7 @@ function OverlaySection() {
           title="Hapus Tender?"
           description="Aksi ini tidak dapat dibatalkan. Data tender akan dihapus permanen."
           confirmLabel="Hapus"
-          onConfirm={() => { setConfirmOpen(false); toast.success('Tender dihapus') }}
+          onConfirm={() => { setConfirmOpen(false); toast.success('Tender dihapus.') }}
           onCancel={() => setConfirmOpen(false)}
         />
       </Row>

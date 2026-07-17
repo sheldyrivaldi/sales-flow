@@ -35,7 +35,25 @@ export const NOGO_PRESET_FLAGS = [
   'Onsite penuh luar kota',
   'Embedded/IoT',
   'Kontrak < 3 bulan',
+  'Cybersecurity/pentest besar tanpa partner',
+  'Desktop-only legacy tanpa modernisasi',
+  'Sertifikasi wajib tidak dimiliki',
+  'Unpaid PoC besar',
+  'Payment 100% setelah delivery',
 ]
 
 export const DEFAULT_VALUE_MIN = 1_000_000_000
 export const DEFAULT_DEADLINE_MIN_DAYS = 7
+
+export const DOCUMENT_LANGUAGE_PRESETS = ['Indonesia', 'Inggris']
+
+export const WORK_MODEL_OPTIONS = ['Remote', 'Hybrid', 'Onsite Terbatas']
+
+export const DECISION_MAKER_PRESETS = [
+  'IT',
+  'Digital Transformation',
+  'Procurement',
+  'Operations',
+  'Finance',
+  'Business Unit',
+]

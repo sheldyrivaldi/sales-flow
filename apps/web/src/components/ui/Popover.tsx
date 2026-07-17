@@ -1,7 +1,8 @@
-import { useState, useCallback } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '../../lib/cn'
-import { useClickOutside } from '../../lib/useClickOutside'
+import { useFloatingPosition } from '../../lib/useFloatingPosition'
 
 type Align = 'start' | 'end'
 
@@ -14,12 +15,36 @@ export interface PopoverProps {
 
 export default function Popover({ trigger, children, align = 'end', className }: PopoverProps) {
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const pos = useFloatingPosition(triggerRef, open, align)
 
   const close = useCallback(() => setOpen(false), [])
-  const containerRef = useClickOutside<HTMLDivElement>(close)
+
+  // Portaled to document.body (see useFloatingPosition's doc comment), so the
+  // trigger's own ref no longer wraps the dropdown DOM-wise — outside-click
+  // must check both trigger and portaled content explicitly.
+  useEffect(() => {
+    if (!open) return
+    function handleMouseDown(e: MouseEvent) {
+      const target = e.target as Node
+      if (triggerRef.current?.contains(target)) return
+      if (contentRef.current?.contains(target)) return
+      close()
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('mousedown', handleMouseDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [open, close])
 
   return (
-    <div ref={containerRef} className="relative inline-flex">
+    <div ref={triggerRef} className="relative inline-flex">
       <div
         onClick={() => setOpen((prev) => !prev)}
         aria-expanded={open}
@@ -35,18 +60,27 @@ export default function Popover({ trigger, children, align = 'end', className }:
       >
         {trigger}
       </div>
-      {open && (
-        <div
-          role="dialog"
-          className={cn(
-            'absolute top-full mt-1 z-50 bg-surface border border-line rounded-card shadow-subtle min-w-48',
-            align === 'end' ? 'right-0' : 'left-0',
-            className
-          )}
-        >
-          {children}
-        </div>
-      )}
+      {open &&
+        pos &&
+        createPortal(
+          <div
+            ref={contentRef}
+            role="dialog"
+            style={{
+              position: 'fixed',
+              top: pos.top,
+              left: pos.left,
+              transform: pos.alignEnd ? 'translateX(-100%)' : undefined,
+            }}
+            className={cn(
+              'z-[9000] bg-surface border border-line rounded-card shadow-lg min-w-48',
+              className
+            )}
+          >
+            {children}
+          </div>,
+          document.body
+        )}
     </div>
   )
 }

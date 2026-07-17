@@ -10,23 +10,26 @@ import (
 )
 
 const (
-	AccessTTL  = 15 * time.Minute
-	RefreshTTL = 7 * 24 * time.Hour
+	AccessTTL     = 15 * time.Minute
+	RefreshTTL    = 7 * 24 * time.Hour
+	TUISessionTTL = 4 * time.Hour
 )
 
-// TokenType distinguishes access tokens from refresh tokens so one can't be
-// replayed as the other — they share a signing key and are otherwise
-// structurally identical.
+// TokenType distinguishes access tokens from refresh tokens (and now TUI
+// session tokens) so one can't be replayed as another — they share a
+// signing key and are otherwise structurally identical.
 type TokenType string
 
 const (
-	TokenAccess  TokenType = "access"
-	TokenRefresh TokenType = "refresh"
+	TokenAccess     TokenType = "access"
+	TokenRefresh    TokenType = "refresh"
+	TokenTUISession TokenType = "tui_session"
 )
 
 type Claims struct {
-	Role domain.Role `json:"role"`
-	Type TokenType   `json:"typ"`
+	Role      domain.Role `json:"role"`
+	Type      TokenType   `json:"typ"`
+	SessionID string      `json:"sid,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -63,6 +66,30 @@ func Issue(u domain.User, secret string) (access, refresh string, err error) {
 	}
 
 	return access, refresh, nil
+}
+
+// IssueTUISession creates a session token for the admin Hermes TUI feature
+// (see internal/hermestui). Unlike access/refresh tokens this is carried in
+// an HttpOnly cookie, not an Authorization header — browsers attach cookies
+// automatically to same-origin requests, including WebSocket handshakes,
+// which is the whole reason this token type exists (see plan §Authentication
+// matrix). sessionID ties the token to a live entry in hermestui.Registry.
+func IssueTUISession(userID, sessionID, secret string) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		Type:      TokenTUISession,
+		SessionID: sessionID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(TUISessionTTL)),
+		},
+	}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(secret))
+	if err != nil {
+		return "", fmt.Errorf("auth.IssueTUISession: %w", err)
+	}
+	return token, nil
 }
 
 // Parse validates a signed JWT string and returns its Claims, rejecting

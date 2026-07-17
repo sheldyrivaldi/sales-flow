@@ -11,11 +11,13 @@ import EventList from './pages/events/EventList'
 import EventDetail from './pages/events/EventDetail'
 import ProspectBoard from './pages/prospects/ProspectBoard'
 import Onboarding from './pages/onboarding/Onboarding'
-import OtakAgent from './pages/profile/OtakAgent'
 import DiscoveryInbox from './pages/discovery/DiscoveryInbox'
 import PlaybooksIndex from './pages/playbooks/PlaybooksIndex'
 import ReportsPage from './pages/reports/ReportsPage'
-import SettingsPage from './pages/settings/SettingsPage'
+import UserManagement from './pages/users/UserManagement'
+import SettingsLayout from './pages/settings/SettingsLayout'
+import SettingsProfile from './pages/settings/SettingsProfile'
+import SettingsAiHermes from './pages/settings/SettingsAiHermes'
 
 export default function AppRoutes() {
   return (
@@ -40,8 +42,12 @@ export default function AppRoutes() {
           <Route path="playbooks" element={<PlaybooksIndex />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="chat" element={<Chat />} />
-          <Route path="otak-agent" element={<OtakAgent />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="users" element={<UserManagement />} />
+          <Route path="settings" element={<SettingsLayout />}>
+            <Route index element={<Navigate to="profile" replace />} />
+            <Route path="profile" element={<SettingsProfile />} />
+            <Route path="ai-agent" element={<SettingsAiHermes />} />
+          </Route>
         </Route>
       </Route>
 

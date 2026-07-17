@@ -80,9 +80,11 @@ func NewSourceService(repo domain.SourceRepository) *SourceService {
 
 func (s *SourceService) Create(ctx context.Context, req *dto.SourceCreateRequest) (*domain.Source, error) {
 	src := &domain.Source{
-		Name:   req.Name,
-		URL:    req.URL,
-		Access: domain.SourceAccessPublik,
+		Name:      req.Name,
+		URL:       req.URL,
+		Access:    domain.SourceAccessPublik,
+		Frequency: "harian",
+		DataTypes: []string{},
 	}
 	src.Country = req.Country
 	src.LegalNote = req.LegalNote
@@ -99,6 +101,12 @@ func (s *SourceService) Create(ctx context.Context, req *dto.SourceCreateRequest
 	}
 	if req.Priority != nil {
 		src.Priority = *req.Priority
+	}
+	if req.Frequency != nil {
+		src.Frequency = *req.Frequency
+	}
+	if req.DataTypes != nil {
+		src.DataTypes = req.DataTypes
 	}
 
 	if err := s.repo.Create(ctx, src); err != nil {
@@ -153,6 +161,12 @@ func (s *SourceService) Update(ctx context.Context, id string, req *dto.SourceUp
 	}
 	if req.Priority != nil {
 		src.Priority = *req.Priority
+	}
+	if req.Frequency != nil {
+		src.Frequency = *req.Frequency
+	}
+	if req.DataTypes != nil {
+		src.DataTypes = req.DataTypes
 	}
 
 	if err := s.repo.Update(ctx, src); err != nil {
@@ -237,6 +251,8 @@ func (s *SourceService) ActivatePreset(ctx context.Context, key string) (*domain
 		LegalNote: &legalNote,
 		Enabled:   true,
 		PresetKey: &presetKey,
+		Frequency: "harian",
+		DataTypes: []string{},
 	}
 	if err := s.repo.Create(ctx, src); err != nil {
 		return nil, fmt.Errorf("source.ActivatePreset create: %w", err)

@@ -16,16 +16,19 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const base =
   'inline-flex items-center justify-center gap-2 font-medium rounded-btn transition-all duration-150 ' +
-  'active:scale-[.98] disabled:opacity-50 disabled:cursor-not-allowed ' +
+  'active:scale-[.97] disabled:opacity-50 disabled:cursor-not-allowed ' +
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2'
 
+// Mapping per design system: primary = emerald + glow; secondary = outline
+// bertint brand (border emerald-200, teks emerald-800); ghost = teks emerald
+// dengan hover tint; danger = merah semantic.
 const variantClasses: Record<Variant, string> = {
   primary:
-    'bg-primary text-white hover:bg-primary-hover',
+    'bg-primary text-white shadow-primary hover:bg-primary-hover active:bg-primary-active disabled:shadow-none',
   secondary:
-    'bg-surface border border-line text-fg hover:bg-surface-subtle',
+    'bg-surface border border-primary-border text-primary-active hover:bg-primary-subtle',
   ghost:
-    'bg-transparent text-fg hover:bg-surface-subtle',
+    'bg-transparent text-primary hover:bg-primary-subtle',
   danger:
     'bg-danger text-white hover:opacity-90',
 }

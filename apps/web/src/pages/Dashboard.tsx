@@ -11,6 +11,7 @@ import EmptyState from '../components/ui/EmptyState'
 import Skeleton, { SkeletonText } from '../components/ui/Skeleton'
 
 import { formatRupiahShort } from '../lib/format'
+import { CountUp } from '../lib/useCountUp'
 import { actionToLabel } from '../api/tenders'
 import { useDashboardSummary } from '../api/dashboard'
 
@@ -40,19 +41,19 @@ export default function Dashboard() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <StatCard
               label="Total Pipeline"
-              value={data.total_pipeline_count}
+              value={<CountUp value={data.total_pipeline_count} />}
               icon={<Users className="w-4 h-4" />}
               hint="prospek aktif"
             />
             <StatCard
               label="Estimasi Revenue"
-              value={formatRupiahShort(data.total_pipeline_value)}
+              value={<CountUp value={data.total_pipeline_value} format={formatRupiahShort} />}
               icon={<Wallet className="w-4 h-4" />}
               hint="total pipeline"
             />
             <StatCard
-              label="Penemuan AI Hari Ini"
-              value={data.discovery_today_count}
+              label="Radar Tender Hari Ini"
+              value={<CountUp value={data.discovery_today_count} />}
               icon={<Sparkles className="w-4 h-4" />}
               hint="tender baru"
             />

@@ -19,10 +19,20 @@ import (
 type fakeCandidateCollector struct {
 	candidates []ai.CandidateTender
 	err        error
+	// crawlable defaults to one dummy source so existing tests pass RunAsync's
+	// NO_SOURCES guard; set noSources=true to exercise the guard itself.
+	noSources bool
 }
 
 func (c *fakeCandidateCollector) CollectCandidates(_ context.Context) ([]ai.CandidateTender, []domain.Source, error) {
 	return c.candidates, nil, c.err
+}
+
+func (c *fakeCandidateCollector) CrawlableSources(_ context.Context) ([]domain.Source, error) {
+	if c.noSources {
+		return nil, nil
+	}
+	return []domain.Source{{ID: "src-1", Name: "Sumber Uji", Access: "publik", Enabled: true}}, nil
 }
 
 func successScoreJSON(fitScore int) []byte {
@@ -87,6 +97,16 @@ func (r *fakeDiscoveryRunRepo) GetByCorrelationKey(_ context.Context, key string
 	return nil, nil
 }
 
+func (r *fakeDiscoveryRunRepo) GetActive(_ context.Context) (*domain.DiscoveryRun, error) {
+	for _, run := range r.items {
+		if run.Status == domain.DiscoveryStatusPending || run.Status == domain.DiscoveryStatusRunning {
+			cp := run
+			return &cp, nil
+		}
+	}
+	return nil, nil
+}
+
 func newTestDiscoveryService(collector candidateCollector, stub *stubHermesClient) (*DiscoveryService, *fakeScoreTenderRepo, *fakeDiscoveryRunRepo) {
 	tenderRepo := &fakeScoreTenderRepo{items: map[string]domain.Tender{}}
 	profileRepo := &fakeScoreProfileRepo{}
@@ -95,7 +115,7 @@ func newTestDiscoveryService(collector candidateCollector, stub *stubHermesClien
 
 	tenderSvc := NewTenderService(tenderRepo, &fakeOutcomeRepo{}, NoopLearningHook())
 	prospectSvc := NewProspectService(&fakeScoreProspectRepo{items: map[string]domain.Prospect{}}, &fakeOutcomeRepo{}, NoopLearningHook())
-	profileSvc := NewProfileService(profileRepo, "", nil)
+	profileSvc := NewProfileService(profileRepo, "", nil, nil)
 	scorer := ai.NewScorer(stub, "sk-test")
 	scoreSvc := NewScoreService(scorer, scoreRepo, tenderSvc, prospectSvc, profileSvc)
 
@@ -334,7 +354,7 @@ func TestDiscoveryService_RunOnce_RaceUniqueViolation_TreatedAsDuplicate(t *test
 	scoreRepo := &fakeProspectScoreRepo{}
 	tenderSvc := NewTenderService(tenderRepo, &fakeOutcomeRepo{}, NoopLearningHook())
 	prospectSvc := NewProspectService(&fakeScoreProspectRepo{items: map[string]domain.Prospect{}}, &fakeOutcomeRepo{}, NoopLearningHook())
-	profileSvc := NewProfileService(profileRepo, "", nil)
+	profileSvc := NewProfileService(profileRepo, "", nil, nil)
 	scoreSvc := NewScoreService(ai.NewScorer(&stubHermesClient{}, "sk-test"), scoreRepo, tenderSvc, prospectSvc, profileSvc)
 	svc := NewDiscoveryService(collector, tenderSvc, scoreSvc, &fakeDiscoveryRunRepo{items: map[string]domain.DiscoveryRun{}})
 

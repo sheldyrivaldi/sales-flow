@@ -49,6 +49,9 @@ func (r *TenderRepo) List(ctx context.Context, f domain.TenderFilter, page, page
 	if f.OnlyInbox {
 		q = q.Where("origin = ? AND status = ? AND reviewed_at IS NULL", domain.OriginDiscovery, domain.TenderStatusIdentified)
 	}
+	if f.ExcludeInbox {
+		q = q.Where("NOT (origin = ? AND status = ? AND reviewed_at IS NULL)", domain.OriginDiscovery, domain.TenderStatusIdentified)
+	}
 	if f.Status != nil {
 		q = q.Where("status = ?", *f.Status)
 	}

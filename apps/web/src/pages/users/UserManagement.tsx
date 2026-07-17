@@ -10,11 +10,11 @@ import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import { toast } from '../../lib/toast'
 import { useUsers, useUpdateUser, useResetPassword } from '../../api/users'
 import type { User, UserRole } from '../../api/users'
-import AddUserModal from './AddUserModal'
+import AddUserModal from '../settings/AddUserModal'
 
 const ROLE_OPTIONS: UserRole[] = ['SALES', 'OPS', 'MANAGER', 'ADMIN']
 
-export default function UsersTab() {
+export default function UserManagement() {
   const { data, isLoading } = useUsers()
   const updateUser = useUpdateUser()
   const resetPassword = useResetPassword()
@@ -98,7 +98,8 @@ export default function UsersTab() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-h2 font-semibold text-fg">User Management</h1>
         <Button leftIcon={<Plus className="w-4 h-4" />} onClick={() => setAddOpen(true)}>
           Tambah Akun
         </Button>
@@ -160,7 +161,7 @@ export default function UsersTab() {
                 if (!newPassword) return
                 navigator.clipboard.writeText(newPassword).then(
                   () => toast.success('Password disalin.'),
-                  () => toast.error('Gagal menyalin. Salin manual dari kotak di atas.'),
+                  () => toast.error('Gagal menyalin, salin manual dari kotak di atas.'),
                 )
               }}
               className="text-fg-muted hover:text-fg"

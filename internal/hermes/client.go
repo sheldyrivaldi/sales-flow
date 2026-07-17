@@ -30,6 +30,11 @@ type ChatRequest struct {
 	Stream     bool       `json:"stream"`
 	SessionKey SessionKey `json:"-"`
 	SessionID  string     `json:"-"`
+	// DocumentBase64/DocumentFilename attach one document (PDF/image) to the
+	// LAST user message — the bridge renders PDFs to page images and sends
+	// them as native vision input (mirrors GenerateJSONFromDocument's wire).
+	DocumentBase64   string `json:"-"`
+	DocumentFilename string `json:"-"`
 }
 
 // ChatResponse adalah respons non-stream dari Hermes.
@@ -76,4 +81,19 @@ type Client interface {
 	// ResetMemory clears Hermes workspace memory for sk (EP-16 TK-16.3.1,
 	// admin-only). Additive to the interface — mirrors Configure's shape.
 	ResetMemory(ctx context.Context, sk SessionKey) error
+}
+
+// DocumentExtractor is an optional capability — implemented by the real
+// httpClient, sending the actual file bytes to Hermes so the model reads the
+// document natively (vision) instead of a lossy Go-side text extraction
+// (EP-13 Company Profile PDF ingest: the RFI source document is
+// table-heavy, and plain-text extraction mangles table structure).
+//
+// Deliberately kept OUT of the Client interface above: dozens of test files
+// across the codebase define their own minimal stubHermesClient implementing
+// just Client's 6 methods, and adding a 7th method there would break every
+// one of them for a capability only PDF ingest needs. Callers that need this
+// type-assert: `de, ok := hc.(hermes.DocumentExtractor)`.
+type DocumentExtractor interface {
+	GenerateJSONFromDocument(ctx context.Context, prompt, filename string, fileBytes []byte, schema any, sk SessionKey) (json.RawMessage, error)
 }

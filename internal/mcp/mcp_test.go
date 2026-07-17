@@ -242,7 +242,7 @@ func newHarness(t *testing.T) *testHarness {
 		Tender:       service.NewTenderService(tenderRepo, outcomeRepo, service.NoopLearningHook()),
 		Event:        service.NewEventService(eventRepo, prospectRepo),
 		Prospect:     service.NewProspectService(prospectRepo, outcomeRepo, service.NoopLearningHook()),
-		Profile:      service.NewProfileService(profileRepo, "", nil),
+		Profile:      service.NewProfileService(profileRepo, "", nil, nil),
 		ProspectRepo: prospectRepo,
 		Audit:        auditRepo,
 		Playbook:     playbookRepo,

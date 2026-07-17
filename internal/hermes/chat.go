@@ -18,6 +18,11 @@ type wireChatReq struct {
 	Model    string    `json:"model"`
 	Messages []Message `json:"messages"`
 	Stream   bool      `json:"stream"`
+	// Lampiran dokumen opsional untuk pesan user terakhir (lihat
+	// ChatRequest.DocumentBase64) — bridge merender PDF ke gambar per
+	// halaman dan mengirimnya sebagai konten multimodal.
+	DocumentBase64   string `json:"document_base64,omitempty"`
+	DocumentFilename string `json:"document_filename,omitempty"`
 }
 
 // wireFunction adalah bagian nested "function" pada tool call dari OpenAI wire format.
@@ -78,9 +83,11 @@ func readErr(resp *http.Response) error {
 // Timeout dikontrol oleh ctx yang diberikan caller.
 func (c *httpClient) Chat(ctx context.Context, req ChatRequest) (ChatResponse, error) {
 	body, err := json.Marshal(wireChatReq{
-		Model:    defaultModel,
-		Messages: req.Messages,
-		Stream:   false,
+		Model:            defaultModel,
+		Messages:         req.Messages,
+		Stream:           false,
+		DocumentBase64:   req.DocumentBase64,
+		DocumentFilename: req.DocumentFilename,
 	})
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("hermes chat: marshal: %w", err)
@@ -125,9 +132,11 @@ func (c *httpClient) Chat(ctx context.Context, req ChatRequest) (ChatResponse, e
 // Caller bertanggung jawab mengonsumsi seluruh channel agar goroutine tidak leak.
 func (c *httpClient) ChatStream(ctx context.Context, req ChatRequest) (<-chan Chunk, error) {
 	body, err := json.Marshal(wireChatReq{
-		Model:    defaultModel,
-		Messages: req.Messages,
-		Stream:   true,
+		Model:            defaultModel,
+		Messages:         req.Messages,
+		Stream:           true,
+		DocumentBase64:   req.DocumentBase64,
+		DocumentFilename: req.DocumentFilename,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("hermes stream: marshal: %w", err)

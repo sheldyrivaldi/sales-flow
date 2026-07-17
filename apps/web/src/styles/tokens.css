@@ -1,29 +1,63 @@
 @theme {
-  /* ── Brand ── */
-  --color-primary: #4F46E5;
-  --color-primary-hover: #4338CA;
+  /* ════════════════════════════════════════════════════════════════════
+     DESIGN TOKENS — single source of truth (emerald rebrand).
 
-  /* ── Accent / AI ── */
-  --color-accent: #7C3AED;
+     60-30-10: ~60% slate neutrals (canvas/surfaces), ~30% secondary
+     neutrals (borders, muted text), ~10% emerald accents. Emerald 600 is
+     the brand anchor; AI features get their own teal identity via
+     --color-accent + --gradient-ai (defined in index.css :root) so AI
+     surfaces read distinct from regular chrome without a second brand.
+     Never hardcode hex in components — always reference these tokens.
+     ════════════════════════════════════════════════════════════════════ */
 
-  /* ── Semantic ── */
+  /* ── Brand · Emerald ── */
+  --color-primary: #059669;         /* emerald-600 — CTA, nav aktif, link */
+  --color-primary-hover: #047857;   /* emerald-700 */
+  --color-primary-active: #065F46;  /* emerald-800 — pressed / outline text */
+  --color-primary-soft: #10B981;    /* emerald-500 — emphasis sekunder */
+  --color-primary-subtle: #ECFDF5;  /* emerald-50  — bg tinted, selected row */
+  --color-primary-border: #A7F3D0;  /* emerald-200 — border tinted */
+
+  /* ── AI accent · Teal (khusus fitur AI) ── */
+  --color-accent: #14B8A6;          /* teal-500 */
+  --color-accent-hover: #0D9488;    /* teal-600 */
+  --color-accent-subtle: #CCFBF1;   /* teal-100 */
+
+  /* ── Semantic — base + subtle(bg) / border / strong(text) ramps ── */
   --color-success: #10B981;
-  --color-warning: #F59E0B;
+  --color-success-subtle: #ECFDF5;
+  --color-success-border: #6EE7B7;
+  --color-success-strong: #065F46;
+
   --color-danger: #EF4444;
-  --color-info: #0EA5E9;
+  --color-danger-subtle: #FEF2F2;
+  --color-danger-border: #FCA5A5;
+  --color-danger-strong: #991B1B;
 
-  /* ── Foreground ── */
-  --color-fg: #0F172A;
-  --color-fg-muted: #475569;
-  --color-fg-subtle: #94A3B8;
+  --color-warning: #F59E0B;
+  --color-warning-subtle: #FFFBEB;
+  --color-warning-border: #FCD34D;
+  --color-warning-strong: #92400E;
 
-  /* ── Surface ── */
-  --color-surface: #FFFFFF;
-  --color-surface-muted: #F8FAFC;
-  --color-surface-subtle: #F1F5F9;
+  --color-info: #3B82F6;
+  --color-info-subtle: #EFF6FF;
+  --color-info-border: #93C5FD;
+  --color-info-strong: #1E40AF;
 
-  /* ── Border ── */
-  --color-line: #E2E8F0;
+  /* ── Foreground · slate ── */
+  --color-fg: #0F172A;              /* slate-900 */
+  --color-fg-muted: #475569;        /* slate-600 */
+  --color-fg-subtle: #94A3B8;       /* slate-400 */
+
+  /* ── Surfaces · layering: canvas < surface-subtle < surface ── */
+  --color-canvas: #F8FAFC;          /* page background (slate-50) */
+  --color-surface: #FFFFFF;         /* card / panel */
+  --color-surface-muted: #F8FAFC;   /* mid layer */
+  --color-surface-subtle: #F1F5F9;  /* alt / inset / hover (slate-100) */
+
+  /* ── Borders ── */
+  --color-line: #E2E8F0;            /* slate-200 */
+  --color-line-strong: #CBD5E1;     /* slate-300 */
 
   /* ── Font family ── */
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -45,6 +79,11 @@
   --radius-btn: 8px;
   --radius-pill: 9999px;
 
-  /* ── Shadow ── */
-  --shadow-subtle: 0 1px 3px rgba(15, 23, 42, 0.08);
+  /* ── Elevation ── */
+  --shadow-subtle: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-pop: 0 4px 12px rgba(15, 23, 42, 0.10), 0 2px 4px rgba(15, 23, 42, 0.05);
+  --shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.14), 0 4px 8px rgba(15, 23, 42, 0.06);
+  --shadow-primary: 0 4px 12px rgba(5, 150, 105, 0.22);   /* emerald glow untuk CTA */
+  --shadow-ai: 0 4px 14px rgba(20, 184, 166, 0.35);       /* teal glow untuk aksi AI */
 }

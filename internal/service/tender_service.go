@@ -69,6 +69,11 @@ type TenderService struct {
 	outcomes domain.OutcomeRepository
 	learn    LearningHook
 	emit     *telemetry.Emitter
+	// aiWarmup (nil-able, set via SetAIWarmup) dipanggil async saat tender
+	// temuan AI DITERIMA dari Radar Tender — pre-generate konten AI
+	// (playbook dsb) supaya halaman detail langsung terisi tanpa menunggu
+	// user menekan tombol generate satu-satu.
+	aiWarmup func(tenderID string)
 }
 
 func NewTenderService(repo domain.TenderRepository, outcomes domain.OutcomeRepository, learn LearningHook) *TenderService {
@@ -361,10 +366,19 @@ func (s *TenderService) Review(ctx context.Context, id string, reason string) (*
 
 	if reason != "" {
 		go s.learn.RecordDiscoveryReject(context.Background(), t.ID, reason)
+	} else if s.aiWarmup != nil {
+		// reason kosong = DITERIMA (bukan Tolak) — pre-generate konten AI di
+		// background. Best-effort: kegagalan generate tidak memengaruhi
+		// review itu sendiri.
+		go s.aiWarmup(t.ID)
 	}
 
 	return t, nil
 }
+
+// SetAIWarmup wires the accepted-from-Radar AI pre-generation hook —
+// optional, nil-safe, out of the constructor (same pattern as SetEmitter).
+func (s *TenderService) SetAIWarmup(fn func(tenderID string)) { s.aiWarmup = fn }
 
 // SetScore denormalizes a fresh AI scoring result (EP-10) onto the tender
 // row so list/detail views can read fit_score/recommended_action/risk_flags/

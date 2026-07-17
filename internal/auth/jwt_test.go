@@ -89,6 +89,50 @@ func TestParse_WrongSigningMethod(t *testing.T) {
 	}
 }
 
+func TestIssueTUISession_RoundTrip(t *testing.T) {
+	secret := "test-secret"
+	token, err := IssueTUISession("user-1", "session-abc", secret)
+	if err != nil {
+		t.Fatalf("IssueTUISession error: %v", err)
+	}
+
+	claims, err := Parse(token, secret, TokenTUISession)
+	if err != nil {
+		t.Fatalf("Parse TUI session error: %v", err)
+	}
+	if claims.Subject != "user-1" {
+		t.Errorf("Subject = %q; want %q", claims.Subject, "user-1")
+	}
+	if claims.SessionID != "session-abc" {
+		t.Errorf("SessionID = %q; want %q", claims.SessionID, "session-abc")
+	}
+	if claims.Type != TokenTUISession {
+		t.Errorf("Type = %q; want %q", claims.Type, TokenTUISession)
+	}
+}
+
+func TestIssueTUISession_RejectedAsOtherTypes(t *testing.T) {
+	secret := "s"
+	tuiToken, err := IssueTUISession("user-1", "session-abc", secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(tuiToken, secret, TokenAccess); err == nil {
+		t.Error("expected TUI session token to be rejected when an access token is wanted")
+	}
+	if _, err := Parse(tuiToken, secret, TokenRefresh); err == nil {
+		t.Error("expected TUI session token to be rejected when a refresh token is wanted")
+	}
+
+	access, _, err := Issue(testUser(), secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(access, secret, TokenTUISession); err == nil {
+		t.Error("expected access token to be rejected when a TUI session token is wanted")
+	}
+}
+
 func TestIssue_AccessAndRefreshAreDifferent(t *testing.T) {
 	access, refresh, err := Issue(testUser(), "s")
 	if err != nil {

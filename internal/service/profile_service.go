@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"mime/multipart"
+	"os"
 
 	"gorm.io/gorm"
 
@@ -34,15 +35,37 @@ func defaultProcurementTypes() []string {
 	return []string{"Barang", "Jasa Konsultansi", "Jasa Lainnya", "Pekerjaan Konstruksi"}
 }
 
+// defaultScoringConfig mirrors the hardcoded rubric weights/thresholds in
+// internal/ai/scoring.go (scoringRubric) and internal/ai/recommend.go
+// (80/65/50) — a never-configured workspace scores identically whether or
+// not this row has been persisted yet (ai.buildScoringPrompt/RecommendAction
+// fall back to the same constants when ScoringConfig is nil).
+func defaultScoringConfig() *domain.ScoringConfig {
+	return &domain.ScoringConfig{
+		WeightCapabilityFit:             20,
+		WeightPortfolioMatch:            15,
+		WeightCommercialAttractiveness:  15,
+		WeightEligibilityFit:            15,
+		WeightDeadlineFeasibility:       10,
+		WeightStrategicAccountValue:     10,
+		WeightDeliveryRisk:              10,
+		WeightCompetitionWinProbability: 5,
+		ThresholdPursue:                 80,
+		ThresholdReview:                 65,
+		ThresholdWatchlist:              50,
+	}
+}
+
 // ProfileService handles read/write of the versioned CompanyProfile aggregate.
 type ProfileService struct {
 	repo      domain.ProfileRepository
 	uploadDir string
-	extractor *ai.Extractor // nil-able: PDF ingest still stores the file (degraded=true) without AI extraction
+	extractor *ai.Extractor    // nil-able: PDF ingest still stores the file (degraded=true) without AI extraction
+	crawl     *CrawlAutomation // nil-able: crawl automation upsert (EP-12) simply doesn't sync to Hermes without it
 }
 
-func NewProfileService(repo domain.ProfileRepository, uploadDir string, extractor *ai.Extractor) *ProfileService {
-	return &ProfileService{repo: repo, uploadDir: uploadDir, extractor: extractor}
+func NewProfileService(repo domain.ProfileRepository, uploadDir string, extractor *ai.Extractor, crawl *CrawlAutomation) *ProfileService {
+	return &ProfileService{repo: repo, uploadDir: uploadDir, extractor: extractor, crawl: crawl}
 }
 
 // defaultAggregate builds the template used both for a never-configured
@@ -54,25 +77,30 @@ func defaultAggregate(companyName string) *domain.ProfileAggregate {
 			CompanyName:       companyName,
 			ServiceCategories: []string{},
 			TechStack:         []string{},
+			Products:          []string{},
 			SourceDocRefs:     []string{},
+			PortfolioRefs:     []string{},
 			CrawlFrequency:    "harian",
 			CrawlEnabled:      false,
 			Version:           0,
 			IsCurrent:         false,
 		},
 		Target: &domain.TargetCriteria{
-			Countries:        []string{"Indonesia"},
-			Industries:       []string{},
-			ValueMin:         &defaultValueMin,
-			Currency:         "IDR",
-			DeadlineMinDays:  &defaultDeadlineMinDays,
-			ProcurementTypes: defaultProcurementTypes(),
+			Countries:          []string{"Indonesia"},
+			Industries:         []string{},
+			ValueMin:           &defaultValueMin,
+			Currency:           "IDR",
+			DeadlineMinDays:    &defaultDeadlineMinDays,
+			ProcurementTypes:   defaultProcurementTypes(),
+			DocumentLanguages:  []string{},
+			DecisionMakerRoles: []string{},
 		},
 		NoGo: &domain.NoGoRule{
 			PresetFlags: []string{},
 			Custom:      []string{},
 		},
-		Keywords: []domain.KeywordSet{},
+		Keywords:      []domain.KeywordSet{},
+		ScoringConfig: defaultScoringConfig(),
 	}
 }
 
@@ -103,12 +131,13 @@ type IngestResult struct {
 }
 
 // IngestUpload validates and stores an uploaded PDF for Company Profile
-// ingest (EP-13 ST-13.1/13.2), then best-effort extracts text + drafts
-// profile fields via Hermes. AI extraction failures (no text layer, Hermes
-// down/invalid JSON) never fail the request — they only set Degraded=true
-// with Draft=nil, since the whole point of AI ingest is optional convenience
-// on top of an upload that must always succeed on its own (PRD §8: "gagal AI
-// → pesan ramah, data utuh").
+// ingest (EP-13 ST-13.1/13.2), then best-effort sends the raw file to Hermes
+// for vision-based field extraction (ai.Extractor — the model reads the PDF
+// itself, not a Go-side text extraction pass). AI extraction failures
+// (Hermes down/invalid JSON) never fail the request — they only set
+// Degraded=true with Draft=nil, since the whole point of AI ingest is
+// optional convenience on top of an upload that must always succeed on its
+// own (PRD §8: "gagal AI → pesan ramah, data utuh").
 func (s *ProfileService) IngestUpload(ctx context.Context, fh *multipart.FileHeader) (*IngestResult, error) {
 	f, err := fh.Open()
 	if err != nil {
@@ -142,14 +171,14 @@ func (s *ProfileService) IngestUpload(ctx context.Context, fh *multipart.FileHea
 		return result, nil
 	}
 
-	text, err := ai.ExtractText(path)
+	pdfBytes, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("profile: IngestUpload: ekstraksi teks gagal (doc_ref=%s): %v", docRef, err)
+		log.Printf("profile: IngestUpload: baca berkas gagal (doc_ref=%s): %v", docRef, err)
 		result.Degraded = true
 		return result, nil
 	}
 
-	draft, err := s.extractor.Extract(ctx, text)
+	draft, err := s.extractor.Extract(ctx, pdfBytes, fh.Filename)
 	if err != nil {
 		log.Printf("profile: IngestUpload: ekstraksi field AI gagal (doc_ref=%s): %v", docRef, err)
 		result.Degraded = true
@@ -177,7 +206,11 @@ func (s *ProfileService) Save(ctx context.Context, req *dto.ProfileUpdateRequest
 			OneLiner:          coalesceStr(req.OneLiner, base.Profile.OneLiner),
 			ServiceCategories: coalesce(req.ServiceCategories, base.Profile.ServiceCategories),
 			TechStack:         coalesce(req.TechStack, base.Profile.TechStack),
+			Products:          coalesce(req.Products, base.Profile.Products),
+			Vision:            coalesceStr(req.Vision, base.Profile.Vision),
+			Mission:           coalesceStr(req.Mission, base.Profile.Mission),
 			SourceDocRefs:     coalesce(req.SourceDocRefs, base.Profile.SourceDocRefs),
+			PortfolioRefs:     coalesce(req.PortfolioRefs, base.Profile.PortfolioRefs),
 			CrawlFrequency:    coalesceCrawlFrequency(req.CrawlFrequency, base.Profile.CrawlFrequency),
 			CrawlEnabled:      coalesceBool(req.CrawlEnabled, base.Profile.CrawlEnabled),
 		},
@@ -186,11 +219,15 @@ func (s *ProfileService) Save(ctx context.Context, req *dto.ProfileUpdateRequest
 	next.Target = mergeTarget(req.Target, base.Target)
 	next.NoGo = mergeNoGo(req.NoGo, base.NoGo)
 	next.Keywords = mergeKeywords(req.Keywords, base.Keywords)
+	next.ScoringConfig = mergeScoringConfig(req.Scoring, base.ScoringConfig)
 
 	created, err := s.repo.CreateVersion(ctx, next)
 	if err != nil {
 		return nil, fmt.Errorf("profile.Save: %w", err)
 	}
+
+	s.syncCrawlAutomation(ctx, created.Profile.CompanyName, created.Profile.CrawlEnabled, created.Profile.CrawlFrequency)
+
 	return created, nil
 }
 
@@ -203,19 +240,52 @@ func mergeTarget(req *dto.TargetCriteriaRequest, base *domain.TargetCriteria) *d
 		return &cp
 	}
 	t := &domain.TargetCriteria{
-		Countries:        coalesce(req.Countries, base.Countries),
-		Industries:       coalesce(req.Industries, base.Industries),
-		ValueMin:         coalesceFloat(req.ValueMin, base.ValueMin),
-		ValueIdeal:       coalesceFloat(req.ValueIdeal, base.ValueIdeal),
-		ValueMax:         coalesceFloat(req.ValueMax, base.ValueMax),
-		Currency:         base.Currency,
-		DeadlineMinDays:  coalesceInt(req.DeadlineMinDays, base.DeadlineMinDays),
-		ProcurementTypes: coalesce(req.ProcurementTypes, base.ProcurementTypes),
+		Countries:          coalesce(req.Countries, base.Countries),
+		Industries:         coalesce(req.Industries, base.Industries),
+		ValueMin:           coalesceFloat(req.ValueMin, base.ValueMin),
+		ValueIdeal:         coalesceFloat(req.ValueIdeal, base.ValueIdeal),
+		ValueMax:           coalesceFloat(req.ValueMax, base.ValueMax),
+		Currency:           base.Currency,
+		DeadlineMinDays:    coalesceInt(req.DeadlineMinDays, base.DeadlineMinDays),
+		ProcurementTypes:   coalesce(req.ProcurementTypes, base.ProcurementTypes),
+		BuyerSizeNote:      coalesceStr(req.BuyerSizeNote, base.BuyerSizeNote),
+		DocumentLanguages:  coalesce(req.DocumentLanguages, base.DocumentLanguages),
+		WorkModel:          coalesceStr(req.WorkModel, base.WorkModel),
+		OnsiteLimitNote:    coalesceStr(req.OnsiteLimitNote, base.OnsiteLimitNote),
+		DecisionMakerRoles: coalesce(req.DecisionMakerRoles, base.DecisionMakerRoles),
 	}
 	if req.Currency != nil {
 		t.Currency = *req.Currency
 	}
 	return t
+}
+
+// mergeScoringConfig applies the same coalesce-per-field pattern as
+// mergeTarget/mergeNoGo: a nil req keeps base's config entirely (falling
+// back to defaultScoringConfig() if base itself has never been configured);
+// a non-nil req only overrides the fields it sets, so a partial tweak (e.g.
+// changing one weight) never clobbers the rest.
+func mergeScoringConfig(req *dto.ScoringConfigRequest, base *domain.ScoringConfig) *domain.ScoringConfig {
+	if base == nil {
+		base = defaultScoringConfig()
+	}
+	if req == nil {
+		cp := *base
+		return &cp
+	}
+	return &domain.ScoringConfig{
+		WeightCapabilityFit:             coalesceIntVal(req.WeightCapabilityFit, base.WeightCapabilityFit),
+		WeightPortfolioMatch:            coalesceIntVal(req.WeightPortfolioMatch, base.WeightPortfolioMatch),
+		WeightCommercialAttractiveness:  coalesceIntVal(req.WeightCommercialAttractiveness, base.WeightCommercialAttractiveness),
+		WeightEligibilityFit:            coalesceIntVal(req.WeightEligibilityFit, base.WeightEligibilityFit),
+		WeightDeadlineFeasibility:       coalesceIntVal(req.WeightDeadlineFeasibility, base.WeightDeadlineFeasibility),
+		WeightStrategicAccountValue:     coalesceIntVal(req.WeightStrategicAccountValue, base.WeightStrategicAccountValue),
+		WeightDeliveryRisk:              coalesceIntVal(req.WeightDeliveryRisk, base.WeightDeliveryRisk),
+		WeightCompetitionWinProbability: coalesceIntVal(req.WeightCompetitionWinProbability, base.WeightCompetitionWinProbability),
+		ThresholdPursue:                 coalesceIntVal(req.ThresholdPursue, base.ThresholdPursue),
+		ThresholdReview:                 coalesceIntVal(req.ThresholdReview, base.ThresholdReview),
+		ThresholdWatchlist:              coalesceIntVal(req.ThresholdWatchlist, base.ThresholdWatchlist),
+	}
 }
 
 func mergeNoGo(req *dto.NoGoRuleRequest, base *domain.NoGoRule) *domain.NoGoRule {
@@ -285,6 +355,16 @@ func coalesceFloat(primary, fallback *float64) *float64 {
 func coalesceInt(primary, fallback *int) *int {
 	if primary != nil {
 		return primary
+	}
+	return fallback
+}
+
+// coalesceIntVal is coalesceInt's counterpart for plain (non-pointer) int
+// fields like ScoringConfig's weights/thresholds: primary is the optional
+// request override, fallback is the persisted value to keep when absent.
+func coalesceIntVal(primary *int, fallback int) int {
+	if primary != nil {
+		return *primary
 	}
 	return fallback
 }

@@ -8,6 +8,15 @@ export function useOverlay(open: boolean, onClose: () => void) {
   const panelRef = useRef<HTMLElement | null>(null)
   const prevFocusRef = useRef<HTMLElement | null>(null)
 
+  // onClose dibaca lewat ref supaya TIDAK masuk dependency effect di bawah.
+  // Hampir semua pemanggil mengoper onClose sebagai inline arrow (identitas
+  // baru tiap render) — bila jadi dependency, SETIAP ketikan di dalam modal
+  // me-re-run effect: cleanup mengembalikan fokus keluar, lalu setup
+  // memfokuskan ulang elemen pertama panel (tombol close). Itulah bug
+  // "cuma bisa ketik satu huruf, fokus lompat ke tombol close".
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   useEffect(() => {
     if (!open) return
 
@@ -24,7 +33,7 @@ export function useOverlay(open: boolean, onClose: () => void) {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.stopPropagation()
-        onClose()
+        onCloseRef.current()
         return
       }
 
@@ -59,7 +68,7 @@ export function useOverlay(open: boolean, onClose: () => void) {
       document.body.style.overflow = ''
       prevFocusRef.current?.focus()
     }
-  }, [open, onClose])
+  }, [open])
 
   return panelRef
 }

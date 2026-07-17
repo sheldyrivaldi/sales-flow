@@ -16,7 +16,7 @@ export default function OtakAgentBanner() {
       <div className="flex items-center gap-2">
         <Sparkles className="w-5 h-5 text-accent shrink-0" aria-hidden="true" />
         <p className="text-body text-fg">
-          Lengkapi Otak Agent agar AI bisa mencari tender untukmu.
+          Lengkapi Profil Perusahaan agar AI bisa mencari tender untukmu.
         </p>
       </div>
       <Link

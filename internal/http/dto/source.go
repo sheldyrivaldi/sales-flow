@@ -9,25 +9,29 @@ import (
 // --- Create ---
 
 type SourceCreateRequest struct {
-	Name      string  `json:"name"       validate:"required"`
-	URL       string  `json:"url"        validate:"required,url"`
-	Country   *string `json:"country"    validate:"omitempty"`
-	Access    *string `json:"access"     validate:"omitempty,oneof=publik login manual"`
-	LegalNote *string `json:"legal_note" validate:"omitempty"`
-	Enabled   *bool   `json:"enabled"    validate:"omitempty"`
-	Priority  *int    `json:"priority"   validate:"omitempty"`
+	Name      string   `json:"name"       validate:"required"`
+	URL       string   `json:"url"        validate:"required,url"`
+	Country   *string  `json:"country"    validate:"omitempty"`
+	Access    *string  `json:"access"     validate:"omitempty,oneof=publik login manual"`
+	LegalNote *string  `json:"legal_note" validate:"omitempty"`
+	Enabled   *bool    `json:"enabled"    validate:"omitempty"`
+	Priority  *int     `json:"priority"   validate:"omitempty"`
+	Frequency *string  `json:"frequency"  validate:"omitempty,oneof=harian 2-3x mingguan manual"`
+	DataTypes []string `json:"data_types" validate:"omitempty"`
 }
 
 // --- Update ---
 
 type SourceUpdateRequest struct {
-	Name      *string `json:"name"       validate:"omitempty"`
-	URL       *string `json:"url"        validate:"omitempty,url"`
-	Country   *string `json:"country"    validate:"omitempty"`
-	Access    *string `json:"access"     validate:"omitempty,oneof=publik login manual"`
-	LegalNote *string `json:"legal_note" validate:"omitempty"`
-	Enabled   *bool   `json:"enabled"    validate:"omitempty"`
-	Priority  *int    `json:"priority"   validate:"omitempty"`
+	Name      *string  `json:"name"       validate:"omitempty"`
+	URL       *string  `json:"url"        validate:"omitempty,url"`
+	Country   *string  `json:"country"    validate:"omitempty"`
+	Access    *string  `json:"access"     validate:"omitempty,oneof=publik login manual"`
+	LegalNote *string  `json:"legal_note" validate:"omitempty"`
+	Enabled   *bool    `json:"enabled"    validate:"omitempty"`
+	Priority  *int     `json:"priority"   validate:"omitempty"`
+	Frequency *string  `json:"frequency"  validate:"omitempty,oneof=harian 2-3x mingguan manual"`
+	DataTypes []string `json:"data_types" validate:"omitempty"`
 }
 
 // --- Activate preset ---
@@ -48,11 +52,17 @@ type SourceResponse struct {
 	Enabled   bool      `json:"enabled"`
 	Priority  int       `json:"priority"`
 	PresetKey *string   `json:"preset_key"`
+	Frequency string    `json:"frequency"`
+	DataTypes []string  `json:"data_types"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func ToSourceResponse(s domain.Source) SourceResponse {
+	dataTypes := s.DataTypes
+	if dataTypes == nil {
+		dataTypes = []string{}
+	}
 	return SourceResponse{
 		ID:        s.ID,
 		Name:      s.Name,
@@ -63,6 +73,8 @@ func ToSourceResponse(s domain.Source) SourceResponse {
 		Enabled:   s.Enabled,
 		Priority:  s.Priority,
 		PresetKey: s.PresetKey,
+		Frequency: s.Frequency,
+		DataTypes: dataTypes,
 		CreatedAt: s.CreatedAt,
 		UpdatedAt: s.UpdatedAt,
 	}

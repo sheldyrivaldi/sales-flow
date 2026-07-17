@@ -15,9 +15,11 @@ import (
 	"salespilot/internal/hermes"
 )
 
-// scoringRubric is rubrik §8 (PRD.md) — 8 dimensions + weights, verbatim.
-// Order and wording feed directly into the prompt; do not reorder/reword
-// without updating PRD.md in lockstep.
+// scoringRubric is rubrik §8 (PRD.md) — 8 dimensions + default weights,
+// verbatim. Used as-is whenever a profile has no ScoringConfig (never
+// configured by Ops); resolveRubric substitutes the configured weights when
+// one exists. Order and wording feed directly into the prompt; do not
+// reorder/reword without updating PRD.md in lockstep.
 var scoringRubric = []struct {
 	Dimension string
 	Weight    int
@@ -32,6 +34,40 @@ var scoringRubric = []struct {
 	{"Competition / win probability", 5},
 }
 
+// resolveRubric returns cfg's configured weights (RFI §8: Ops-adjustable) in
+// the same fixed dimension order as scoringRubric, or scoringRubric itself
+// unchanged when cfg is nil — so a profile that has never touched the
+// Scoring card scores identically to before ScoringConfig existed.
+func resolveRubric(cfg *domain.ScoringConfig) []struct {
+	Dimension string
+	Weight    int
+} {
+	if cfg == nil {
+		return scoringRubric
+	}
+	weights := []int{
+		cfg.WeightCapabilityFit,
+		cfg.WeightPortfolioMatch,
+		cfg.WeightCommercialAttractiveness,
+		cfg.WeightEligibilityFit,
+		cfg.WeightDeadlineFeasibility,
+		cfg.WeightStrategicAccountValue,
+		cfg.WeightDeliveryRisk,
+		cfg.WeightCompetitionWinProbability,
+	}
+	out := make([]struct {
+		Dimension string
+		Weight    int
+	}, len(scoringRubric))
+	for i, r := range scoringRubric {
+		out[i] = struct {
+			Dimension string
+			Weight    int
+		}{Dimension: r.Dimension, Weight: weights[i]}
+	}
+	return out
+}
+
 // ScoreTargetType identifies whether a ScoreInput was built from a tender or
 // a prospect. Both are scored through the same prompt/rubric shape.
 type ScoreTargetType string
@@ -39,6 +75,10 @@ type ScoreTargetType string
 const (
 	ScoreTargetTender   ScoreTargetType = "tender"
 	ScoreTargetProspect ScoreTargetType = "prospect"
+	// ScoreTargetEvent/ScoreTargetCustom dipakai playbook (bukan scoring):
+	// playbook bisa dibuat untuk event tertentu atau topik custom mandiri.
+	ScoreTargetEvent  ScoreTargetType = "event"
+	ScoreTargetCustom ScoreTargetType = "custom"
 )
 
 // ScoreInput is the normalized shape both domain.Tender and domain.Prospect
@@ -93,6 +133,25 @@ func ScoreInputFromProspect(p domain.Prospect, profile *domain.ProfileAggregate)
 		StatusOrStage: string(p.Stage),
 		Profile:       profile,
 	}
+}
+
+// ScoreInputFromEvent normalizes a domain.Event into a ScoreInput — dipakai
+// generator playbook untuk target event (scoring sendiri tidak menerima
+// event).
+func ScoreInputFromEvent(e domain.Event, profile *domain.ProfileAggregate) ScoreInput {
+	in := ScoreInput{
+		TargetType:    ScoreTargetEvent,
+		Title:         e.Name,
+		StatusOrStage: string(e.Status),
+		Profile:       profile,
+	}
+	if e.Organizer != nil {
+		in.Buyer = *e.Organizer
+	}
+	if e.Notes != nil {
+		in.ScopeSummary = *e.Notes
+	}
+	return in
 }
 
 func derefStr(s *string) string {
@@ -160,9 +219,14 @@ func buildScoringPrompt(in ScoreInput) string {
 		}
 	}
 
+	var scoringCfg *domain.ScoringConfig
+	if in.Profile != nil {
+		scoringCfg = in.Profile.ScoringConfig
+	}
+
 	b.WriteString("\n## Rubrik Scoring (8 dimensi, bobot total 100%)\n")
 	b.WriteString("Nilai TIAP dimensi berikut dan berikan evidence singkat (pass/warn/fail) untuk masing-masing:\n")
-	for _, r := range scoringRubric {
+	for _, r := range resolveRubric(scoringCfg) {
 		fmt.Fprintf(&b, "- %s — bobot %d%%\n", r.Dimension, r.Weight)
 	}
 

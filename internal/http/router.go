@@ -15,6 +15,7 @@ import (
 	"salespilot/internal/auth"
 	"salespilot/internal/config"
 	"salespilot/internal/hermes"
+	"salespilot/internal/hermestui"
 	"salespilot/internal/http/handlers"
 	applog "salespilot/internal/log"
 	"salespilot/internal/mcp"
@@ -22,6 +23,13 @@ import (
 	"salespilot/internal/service"
 	"salespilot/internal/telemetry"
 )
+
+// schedulerTickInterval is how often the discovery Scheduler wakes up to
+// check whether a crawl is due (EP-12 ST-12.5.1) — not the crawl frequency
+// itself (that's per-workspace, company_profile.crawl_frequency). Small
+// enough that toggling crawl_enabled or changing crawl_frequency from the
+// UI takes effect within a few minutes, not a full day.
+const schedulerTickInterval = 5 * time.Minute
 
 // New creates and configures the Echo instance (middleware + routes). It
 // also returns ProfileService and DiscoveryService so apps/api/main.go can
@@ -31,7 +39,7 @@ import (
 // AISettingService is returned the same way so main.go can rehydrate the
 // bridge's config at boot (EP-18 TK-18.4.4) without re-decoding
 // CONFIG_ENC_KEY a second time.
-func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *service.ProfileService, *service.DiscoveryService, *service.AISettingService) {
+func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *service.ProfileService, *service.DiscoveryService, *service.AISettingService, *handlers.HermesTuiHandler, *ai.Scheduler) {
 	e := echo.New()
 	e.HideBanner = true
 
@@ -137,7 +145,23 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 
 	profileRepo := repository.NewProfileRepo(db)
 	profileExtractor := ai.NewExtractor(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
-	profileSvc := service.NewProfileService(profileRepo, cfg.UploadDir, profileExtractor)
+	// Crawl automation upsert (EP-12) — hermestui.NewCronClient returns nil
+	// when HERMES_DASHBOARD_SESSION_TOKEN is unset, degrading the feature to
+	// "not synced to Hermes" without affecting anything else. Assigned via an
+	// explicit nil check, not straight into the CronJobUpserter interface
+	// field: a nil *hermestui.CronClient boxed directly into an interface
+	// value is NOT itself a nil interface, which would defeat every
+	// `s.crawl.Client == nil` guard in crawl_automation.go.
+	var cronUpserter service.CronJobUpserter
+	if cc := hermestui.NewCronClient(cfg); cc != nil {
+		cronUpserter = cc
+	}
+	crawlAutomation := &service.CrawlAutomation{
+		Client:             cronUpserter,
+		TriggerSecret:      cfg.CronTriggerSecret,
+		InternalAPIBaseURL: cfg.InternalAPIBaseURL,
+	}
+	profileSvc := service.NewProfileService(profileRepo, cfg.UploadDir, profileExtractor, crawlAutomation)
 	profileH := handlers.NewProfileHandler(profileSvc)
 
 	sourceRepo := repository.NewSourceRepo(db)
@@ -158,6 +182,7 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	playbookRepo := repository.NewPlaybookRepo(db)
 	playbookGen := ai.NewPlaybookGenerator(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
 	playbookSvc := service.NewPlaybookService(playbookGen, playbookRepo, tenderSvc, prospectSvc, profileSvc)
+	playbookSvc.SetEvents(eventSvc)
 	playbookH := handlers.NewPlaybookHandler(playbookSvc, auditRepo)
 
 	dashboardSvc := service.NewDashboardService(prospectRepo, tenderRepo)
@@ -169,11 +194,47 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	reportSvc.SetEmitter(emitter)
 	reportH := handlers.NewReportHandler(reportSvc, auditRepo)
 
+	tenderAssist := ai.NewTenderAssist(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
+	tenderAssistH := handlers.NewTenderAssistHandler(tenderAssist, tenderSvc, profileSvc)
+
+	// Saat tender temuan AI DITERIMA dari Radar Tender, pre-generate playbook
+	// di background (skor sudah ada dari pipeline discovery) — halaman detail
+	// langsung terisi konten AI tanpa menunggu klik generate manual.
+	tenderSvc.SetAIWarmup(func(tenderID string) {
+		wctx, wcancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer wcancel()
+		if _, err := playbookSvc.Generate(wctx, ai.ScoreTargetTender, tenderID); err != nil {
+			log.Printf("ai warmup: playbook untuk tender %s gagal: %v", tenderID, err)
+		}
+	})
+
+	eventAnalyzer := ai.NewEventAnalyzer(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
+	eventAnalysisH := handlers.NewEventAnalysisHandler(eventAnalyzer, eventSvc, profileSvc)
+
 	discoveryRunRepo := repository.NewDiscoveryRunRepo(db)
 	discoveryCrawler := ai.NewHermesCrawler(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
 	discoveryOrchestrator := ai.NewDiscoveryOrchestrator(discoveryCrawler, sourceRepo, profileSvc, auditRepo)
 	discoverySvc := service.NewDiscoveryService(discoveryOrchestrator, tenderSvc, scoreSvc, discoveryRunRepo)
 	discoveryH := handlers.NewDiscoveryHandler(discoverySvc, tenderSvc)
+
+	// Discovery scheduler (EP-12 ST-12.5.1) — constructed here (not in
+	// main.go) so InternalHandler below and main.go's own periodic
+	// scheduler.Start(...) share this exact instance; a second, separately
+	// constructed Scheduler would let their period-bucketed idempotency
+	// keys and DiscoveryService instances drift apart.
+	scheduler := ai.NewScheduler(profileSvc, discoverySvc, schedulerTickInterval)
+	internalH := handlers.NewInternalHandler(scheduler, cfg.CronTriggerSecret)
+
+	// Admin Hermes TUI (native Hermes CLI/TUI over a browser terminal,
+	// proxied to the hermes-tui/ttyd sidecar) — feature degrades to simply
+	// unavailable (routes unregistered below) rather than a boot crash if
+	// HermesTuiBaseURL is somehow malformed, consistent with this codebase's
+	// non-blocking configuration principle (see AI Provider Config above).
+	hermesTuiSessionRepo := repository.NewHermesTuiSessionRepo(db)
+	hermesTuiH, hermesTuiErr := handlers.NewHermesTuiHandler(hermesTuiSessionRepo, cfg)
+	if hermesTuiErr != nil {
+		log.Printf("hermes tui: HERMES_TUI_BASE_URL tidak valid, fitur dinonaktifkan: %v", hermesTuiErr)
+	}
 
 	// MCP server (EP-09) — mounted top-level like /healthz, not under /api,
 	// and authenticated with a static Bearer token (SalesMCPToken), not JWT.
@@ -187,6 +248,12 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 		Playbook:     playbookDraftRepo,
 	})
 	e.Any("/mcp", echo.WrapHandler(mcp.Handler(mcpSrv)), mcp.BearerAuth(cfg.SalesMCPToken))
+
+	// Internal callback (EP-12 crawl automation via Hermes's own scheduler)
+	// — mounted top-level like /mcp, secret-gated instead of JWT since the
+	// caller is the Hermes cron job's agent turn, not a logged-in user.
+	e.POST("/internal/discovery/trigger", internalH.TriggerDiscovery)
+	e.GET("/internal/discovery/trigger", internalH.TriggerDiscovery)
 
 	api := e.Group("/api")
 
@@ -219,6 +286,34 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	admin := authd.Group("/admin", auth.RequireCapability(auth.CapManageUsers))
 	admin.POST("/hermes/reset-memory", adminH.ResetHermesMemory)
 
+	if hermesTuiH != nil {
+		// Ticket issuance is JWT+RBAC gated like every other admin route.
+		admin.POST("/hermes/tui/ticket", hermesTuiH.IssueTicket)
+
+		// Everything below is DELIBERATELY registered on api, NOT authd —
+		// browsers cannot attach a custom Authorization header to a plain
+		// navigation (the iframe's src, /enter) or to the WS handshake
+		// ttyd's own frontend initiates (/ws). Auth is the single-use
+		// ticket (once, at /enter) then a session cookie (CookieGate, on
+		// every request after). Do not "fix" this by moving these under
+		// authd — that would silently break the whole feature, since
+		// neither a navigation nor ttyd's own JS can supply a Bearer token.
+		api.GET("/admin/hermes/tui/enter", hermesTuiH.Enter)
+
+		tuiGated := api.Group("/admin/hermes/tui", hermesTuiH.CookieGate)
+		tuiGated.POST("/end", hermesTuiH.EndSession)
+		// The dashboard exposes several WS endpoints (unlike ttyd's single
+		// /ws) — registered explicitly so echo's router recognizes them as
+		// WS upgrades rather than falling through to the HTTP catch-all.
+		for _, wsPath := range []string{"/api/pty", "/api/ws", "/api/pub", "/api/events"} {
+			tuiGated.GET(wsPath, hermesTuiH.ProxyWS)
+		}
+		// Catch-all for the dashboard's own HTML/JS/CSS/API — path prefix
+		// stripped and X-Forwarded-Prefix set by ProxyHTTP's Director.
+		tuiGated.Any("", hermesTuiH.ProxyHTTP)
+		tuiGated.Any("/*", hermesTuiH.ProxyHTTP)
+	}
+
 	// Settings — AI/Hermes status + test koneksi (EP-18 ST-18.1). CapViewData
 	// (semua role) sama seperti /health/hermes — tab AI/Hermes di Settings
 	// terbuka untuk semua role, hanya aksi reset/config yang admin-only.
@@ -247,7 +342,10 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	tenders.POST("/:id/review", tenderH.Review)
 	tenders.POST("/:id/score", scoreH.ScoreTender)
 	tenders.GET("/:id/score", scoreH.GetTenderScore)
+	tenders.POST("/:id/doc-checklist", tenderAssistH.DocChecklist)
+	tenders.POST("/:id/proposal-draft", tenderAssistH.ProposalDraft)
 	tenders.POST("/:id/playbook", playbookH.GenerateTender)
+	tenders.POST("/:id/playbook/from-document", playbookH.GenerateTenderFromDocument)
 	tenders.GET("/:id/playbooks", playbookH.ListTenderPlaybooks)
 
 	// Events — semua role yang punya CapCRUDData.
@@ -258,6 +356,10 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	events.PUT("/:id", eventH.Update)
 	events.DELETE("/:id", eventH.Delete)
 	events.POST("/:id/convert", eventH.Convert)
+	events.POST("/:id/analyze", eventAnalysisH.Analyze)
+	events.POST("/:id/playbook", playbookH.GenerateEvent)
+	events.POST("/:id/playbook/from-document", playbookH.GenerateEventFromDocument)
+	events.GET("/:id/playbooks", playbookH.ListEventPlaybooks)
 
 	// Prospects — semua role yang punya CapCRUDData.
 	prospects := authd.Group("/prospects", auth.RequireCapability(auth.CapCRUDData))
@@ -270,11 +372,16 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	prospects.POST("/:id/score", scoreH.ScoreProspect)
 	prospects.GET("/:id/score", scoreH.GetProspectScore)
 	prospects.POST("/:id/playbook", playbookH.GenerateProspect)
+	prospects.POST("/:id/playbook/from-document", playbookH.GenerateProspectFromDocument)
 	prospects.GET("/:id/playbooks", playbookH.ListProspectPlaybooks)
 
 	// Playbooks — akses by-id lintas target-type (CapCRUDData, sama seperti tenders/prospects).
 	playbooks := authd.Group("/playbooks", auth.RequireCapability(auth.CapCRUDData))
+	// Rute statis "custom" HARUS terdaftar sebelum rute param ":id".
+	playbooks.GET("/custom", playbookH.ListCustom)
+	playbooks.POST("/custom", playbookH.GenerateCustom)
 	playbooks.GET("/:id", playbookH.Get)
+	playbooks.POST("/:id/refine", playbookH.Refine)
 
 	// Profile ("Otak Agent") — GET boleh semua role (SALES read-only),
 	// PUT (buat versi baru) hanya OPS/MANAGER/ADMIN.
@@ -319,8 +426,9 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	convs.GET("", chatH.List)
 	convs.GET("/:id", chatH.Get)
 	convs.POST("/:id/chat", chatH.Chat)
+	convs.DELETE("/:id", chatH.Delete)
 
-	return e, profileSvc, discoverySvc, aiSettingSvc
+	return e, profileSvc, discoverySvc, aiSettingSvc, hermesTuiH, scheduler
 }
 
 func healthzHandler(db *gorm.DB) echo.HandlerFunc {

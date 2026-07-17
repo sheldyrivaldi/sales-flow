@@ -130,6 +130,33 @@ func (h *ChatHandler) Get(c echo.Context) error {
 	})
 }
 
+// Delete handles DELETE /api/conversations/:id
+func (h *ChatHandler) Delete(c echo.Context) error {
+	user, ok := auth.UserFromContext(c)
+	if !ok {
+		return httperr.Write(c, httperr.NewUnauthorized("tidak terautentikasi"))
+	}
+
+	id := c.Param("id")
+	if err := h.svc.DeleteConversation(c.Request().Context(), id, user.ID); err != nil {
+		return httperr.Write(c, err)
+	}
+
+	return c.NoContent(http.StatusNoContent)
+}
+
+// chatGuardrailPrompt membatasi kanal chat/Tanya AI ke percakapan analitis:
+// membaca & menganalisa data ya, aksi tulis tidak. Dikirim sebagai system
+// message di SETIAP giliran (bukan hanya giliran pertama) supaya batasan
+// tetap berlaku sepanjang percakapan.
+const chatGuardrailPrompt = "Kamu adalah asisten AI SalesPilot untuk tim sales B2B. " +
+	"Batasan KERAS untuk kanal chat ini: kamu HANYA boleh menjawab pertanyaan, menganalisa, merangkum, dan MEMBACA data " +
+	"(tender, prospek, event, profil perusahaan) atau mencari informasi publik. " +
+	"Kamu DILARANG melakukan aksi tulis dalam bentuk apa pun dari chat ini: dilarang membuat/mengubah/menghapus data aplikasi, " +
+	"dilarang membuat atau menulis file, dilarang menjalankan kode/perintah/skrip, dan dilarang memanggil tool yang bersifat menulis atau mengeksekusi. " +
+	"Bila user meminta aksi seperti itu, jelaskan dengan sopan bahwa aksi dilakukan lewat menu aplikasi terkait (mis. tombol di halaman Tender/Pipeline/Playbook), " +
+	"lalu bantu dengan analisa atau langkah panduannya. Jangan pernah menyebut nama teknologi/engine internal di balik layar — sebut dirimu sebagai AI SalesPilot."
+
 // Chat handles POST /api/conversations/:id/chat (SSE relay)
 func (h *ChatHandler) Chat(c echo.Context) error {
 	var req dto.ChatMessageRequest
@@ -151,8 +178,29 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 		return httperr.Write(c, err)
 	}
 
-	// Persist user message (and auto-set title if blank).
-	if _, err := h.svc.AppendUserMessage(c.Request().Context(), conv, req.Content); err != nil {
+	// Optional document attachment (PDF/image) — validated here, forwarded to
+	// the bridge which renders PDFs to page images for native vision reading.
+	// ~10 MB raw ≈ 14 MB base64; same cap as Company Profile PDF ingest.
+	var attachB64, attachName string
+	if req.AttachmentBase64 != nil && *req.AttachmentBase64 != "" {
+		attachB64 = *req.AttachmentBase64
+		if len(attachB64) > 14*1024*1024 {
+			return httperr.Write(c, httperr.NewBadRequest("FILE_TOO_LARGE", "lampiran melebihi batas ukuran 10 MB"))
+		}
+		attachName = "document.pdf"
+		if req.AttachmentName != nil && *req.AttachmentName != "" {
+			attachName = *req.AttachmentName
+		}
+	}
+
+	// Persist user message (and auto-set title if blank). The attachment's
+	// bytes are not persisted — only a marker so the history shows a file was
+	// sent with this turn.
+	persistedContent := req.Content
+	if attachB64 != "" {
+		persistedContent += "\n\n[Lampiran: " + attachName + "]"
+	}
+	if _, err := h.svc.AppendUserMessage(c.Request().Context(), conv, persistedContent); err != nil {
 		return httperr.Write(c, err)
 	}
 
@@ -161,13 +209,19 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 	if err != nil {
 		return httperr.Write(c, err)
 	}
-	hermesMessages := toHermesMessages(history)
+	// Pesan system pembatas SELALU di depan: chat/Tanya AI adalah kanal
+	// percakapan — analisa dan membaca data saja. Aksi tulis (buat/ubah/
+	// hapus data, buat file, jalankan kode/perintah) dilakukan lewat fitur
+	// aplikasi masing-masing, bukan dari chat.
+	hermesMessages := append([]hermes.Message{{Role: "system", Content: chatGuardrailPrompt}}, toHermesMessages(history)...)
 
 	hermesReq := hermes.ChatRequest{
-		Messages:   hermesMessages,
-		Stream:     true,
-		SessionKey: hermes.SessionKey(conv.SessionKey),
-		SessionID:  conv.HermesSessionID,
+		Messages:         hermesMessages,
+		Stream:           true,
+		SessionKey:       hermes.SessionKey(conv.SessionKey),
+		SessionID:        conv.HermesSessionID,
+		DocumentBase64:   attachB64,
+		DocumentFilename: attachName,
 	}
 
 	ch, streamErr := h.hermes.ChatStream(c.Request().Context(), hermesReq)

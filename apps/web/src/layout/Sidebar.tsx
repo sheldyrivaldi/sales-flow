@@ -1,9 +1,12 @@
-import { NavLink } from 'react-router'
+import { useState } from 'react'
+import { NavLink, useLocation } from 'react-router'
+import { ChevronRight } from 'lucide-react'
 import { cn } from '../lib/cn'
 import { AiBadge } from '../components/ui/Badge'
 import Badge from '../components/ui/Badge'
 import Tooltip from '../components/ui/Tooltip'
 import { navItems } from './navItems'
+import type { NavItem } from './navItems'
 import { useAuthStore } from '../store/auth'
 import { can } from '../lib/rbac'
 
@@ -12,15 +15,66 @@ export interface SidebarProps {
   onToggle: () => void
 }
 
+function isPathActive(pathname: string, path: string, exact: boolean) {
+  return exact ? pathname === path : pathname === path || pathname.startsWith(path + '/')
+}
+
+// Shared active/inactive treatment for every nav row (top-level, collapsed
+// leaf, and expandable parent) so they read as one coherent system. Active =
+// soft emerald tint + emerald text + semibold; inactive = muted slate that
+// warms to full fg on hover. The left accent bar is added separately by the
+// caller (it doesn't apply in the collapsed rail).
+const rowBase =
+  'flex items-center gap-2.5 w-full rounded-btn px-2.5 py-2 text-body transition-all duration-150 ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-1'
+const rowActive = 'bg-primary-subtle text-primary font-semibold'
+const rowInactive = 'text-fg-muted font-medium hover:bg-surface-subtle hover:text-fg'
+
+// ActiveBar is the emerald indicator on the left edge of an active pill.
+function ActiveBar() {
+  return (
+    <span
+      className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary"
+      aria-hidden="true"
+    />
+  )
+}
+
 export default function Sidebar({ collapsed }: SidebarProps) {
   const role = useAuthStore((s) => s.user?.role)
+  const { pathname } = useLocation()
   const visibleItems = navItems.filter((item) => !item.capability || can(role, item.capability))
+
+  // Explicit open/closed overrides from clicking a parent row, keyed by item
+  // path. Absent = "follow the route" (expanded iff a child is active).
+  const [overrides, setOverrides] = useState<Record<string, boolean>>({})
+  const [trackedActive, setTrackedActive] = useState<Record<string, boolean>>({})
+
+  function isExpanded(item: NavItem): boolean {
+    const branchActive = item.children?.some((c) => isPathActive(pathname, c.path, false)) ?? false
+    if (trackedActive[item.path] !== branchActive) {
+      if (item.path in overrides) {
+        setOverrides((prev) => {
+          const next = { ...prev }
+          delete next[item.path]
+          return next
+        })
+      }
+      setTrackedActive((prev) => ({ ...prev, [item.path]: branchActive }))
+      return branchActive
+    }
+    return overrides[item.path] ?? branchActive
+  }
+
+  function toggle(item: NavItem) {
+    setOverrides((prev) => ({ ...prev, [item.path]: !isExpanded(item) }))
+  }
 
   return (
     <aside
       className={cn(
         'flex flex-col h-full bg-surface border-r border-line shrink-0 transition-all duration-200',
-        collapsed ? 'w-14' : 'w-56'
+        collapsed ? 'w-14' : 'w-60'
       )}
       aria-label="Navigasi utama"
     >
@@ -28,33 +82,29 @@ export default function Sidebar({ collapsed }: SidebarProps) {
       <div
         className={cn(
           'flex items-center h-14 px-3 border-b border-line shrink-0',
-          collapsed ? 'justify-center' : 'gap-2'
+          collapsed ? 'justify-center' : 'gap-2.5'
         )}
       >
-        <span className="w-7 h-7 rounded-btn bg-primary flex items-center justify-center text-white font-bold text-caption shrink-0">
+        <span
+          className="w-8 h-8 rounded-btn bg-gradient-to-br from-primary to-primary-hover flex items-center justify-center text-white font-bold text-body shrink-0 shadow-[0_2px_8px_rgba(5,150,105,0.35)]"
+          aria-hidden="true"
+        >
           S
         </span>
         {!collapsed && (
-          <span className="font-semibold text-body text-fg truncate">SalesPilot</span>
+          <span className="font-semibold text-body text-fg truncate tracking-tight">SalesPilot</span>
         )}
       </div>
 
       {/* Nav items */}
-      <nav className="flex-1 overflow-y-auto py-2">
+      <nav className="flex-1 overflow-y-auto px-2 py-3">
         {visibleItems.map((item) => {
           const Icon = item.icon
-          const linkContent = (isActive: boolean) => (
-            <span
-              className={cn(
-                'flex items-center gap-2.5 w-full rounded-btn px-2.5 py-2 text-body font-medium transition-colors duration-150',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-                isActive
-                  ? 'bg-primary/10 text-primary'
-                  : 'text-fg-muted hover:bg-surface-subtle hover:text-fg',
-                collapsed && 'justify-center px-0'
-              )}
-            >
-              <Icon className="w-4.5 h-4.5 shrink-0" aria-hidden="true" />
+          const hasChildren = !!item.children && item.children.length > 0
+          const linkContent = (isActive: boolean, withBar = true) => (
+            <span className={cn('relative', rowBase, isActive ? rowActive : rowInactive, collapsed && 'justify-center px-0')}>
+              {isActive && withBar && !collapsed && <ActiveBar />}
+              <Icon className={cn('w-4.5 h-4.5 shrink-0', isActive && 'text-primary')} aria-hidden="true" />
               {!collapsed && (
                 <>
                   <span className="flex-1 truncate">{item.label}</span>
@@ -69,29 +119,77 @@ export default function Sidebar({ collapsed }: SidebarProps) {
             </span>
           )
 
+          // Collapsed rail: no room for a nested tree — parent falls back to a
+          // plain link (to its own path) with a tooltip, same as any leaf.
+          if (!hasChildren || collapsed) {
+            return (
+              <div key={item.path}>
+                {item.dividerBefore && (
+                  <div className="border-t border-line mx-2 my-2.5" role="separator" />
+                )}
+                {collapsed ? (
+                  <Tooltip content={item.label} side="right">
+                    <NavLink to={item.path} end={item.path === '/'} className="block py-0.5">
+                      {({ isActive }) => linkContent(isActive)}
+                    </NavLink>
+                  </Tooltip>
+                ) : (
+                  <NavLink to={item.path} end={item.path === '/'} className="block py-0.5">
+                    {({ isActive }) => linkContent(isActive)}
+                  </NavLink>
+                )}
+              </div>
+            )
+          }
+
+          // Expandable parent with nested sub-items.
+          const expanded = isExpanded(item)
+          const parentActive = isPathActive(pathname, item.path, false)
+
           return (
             <div key={item.path}>
               {item.dividerBefore && (
-                <div className="border-t border-line mx-3 my-2" role="separator" />
+                <div className="border-t border-line mx-2 my-2.5" role="separator" />
               )}
-              {collapsed ? (
-                <Tooltip content={item.label} side="right">
-                  <NavLink
-                    to={item.path}
-                    end={item.path === '/'}
-                    className={cn('block px-1.5 py-0.5')}
-                  >
-                    {({ isActive }) => linkContent(isActive)}
-                  </NavLink>
-                </Tooltip>
-              ) : (
-                <NavLink
-                  to={item.path}
-                  end={item.path === '/'}
-                  className={cn('block px-1.5 py-0.5')}
-                >
-                  {({ isActive }) => linkContent(isActive)}
-                </NavLink>
+              <button
+                type="button"
+                onClick={() => toggle(item)}
+                aria-expanded={expanded}
+                className={cn('relative py-0.5 w-full', 'focus-visible:outline-none')}
+              >
+                <span className={cn('relative', rowBase, parentActive ? rowActive : rowInactive)}>
+                  {parentActive && <ActiveBar />}
+                  <Icon className={cn('w-4.5 h-4.5 shrink-0', parentActive && 'text-primary')} aria-hidden="true" />
+                  <span className="flex-1 truncate text-left">{item.label}</span>
+                  <ChevronRight
+                    className={cn('w-3.5 h-3.5 shrink-0 transition-transform duration-200', expanded && 'rotate-90')}
+                    aria-hidden="true"
+                  />
+                </span>
+              </button>
+
+              {expanded && (
+                <div className="mt-0.5 mb-0.5 flex flex-col gap-0.5 pl-5 relative">
+                  {/* Guide rail connecting nested children to the parent. */}
+                  <span className="absolute left-4 top-1 bottom-1 w-px bg-line" aria-hidden="true" />
+                  {item.children!.map((child) => (
+                    <NavLink
+                      key={child.path}
+                      to={child.path}
+                      className={({ isActive }) =>
+                        cn(
+                          'flex items-center rounded-btn px-2.5 py-1.5 text-body transition-all duration-150',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-1',
+                          isActive
+                            ? 'bg-primary-subtle text-primary font-semibold'
+                            : 'text-fg-muted font-medium hover:bg-surface-subtle hover:text-fg'
+                        )
+                      }
+                    >
+                      <span className="truncate">{child.label}</span>
+                    </NavLink>
+                  ))}
+                </div>
               )}
             </div>
           )

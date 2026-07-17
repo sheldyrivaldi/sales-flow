@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, buildQueryString } from '../lib/api'
+import { AI_MUTATION_KEYS } from '../lib/aiMutation'
+import type { AIMutationMeta } from '../lib/aiMutation'
 import type { Prospect } from './prospects'
 
 export type { Prospect }
@@ -133,6 +135,46 @@ export function useConvertEvent() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] })
       queryClient.invalidateQueries({ queryKey: ['prospects'] })
+    },
+  })
+}
+
+// ── Analisa Peserta Event (AI, on-demand) ─────────────────────────────────────
+
+export type EventQuadrant = 'prioritas_utama' | 'perlu_digarap' | 'quick_win' | 'dipantau'
+
+export interface EventCompanyInsight {
+  name: string
+  industry: string
+  potential: 'tinggi' | 'rendah'
+  interest: 'tinggi' | 'rendah'
+  quadrant: EventQuadrant
+  note: string
+}
+
+export interface EventAnalysis {
+  companies: EventCompanyInsight[]
+  summary: string
+  timeline_suggestions: string[]
+}
+
+/** Analisa dokumen peserta event: PDF dikirim apa adanya (dibaca AI via
+ * vision), Excel dikonversi ke CSV di browser dan dikirim sebagai teks. */
+export function useAnalyzeEvent() {
+  return useMutation({
+    mutationKey: [...AI_MUTATION_KEYS.eventAnalysis],
+    meta: {
+      successToast: 'Analisa peserta event selesai.',
+      errorToast: 'Analisa peserta gagal, coba lagi nanti.',
+    } satisfies AIMutationMeta,
+    mutationFn: ({ id, file, tableText }: { id: string; file?: File; tableText?: string }) => {
+      const formData = new FormData()
+      if (file) formData.append('file', file)
+      if (tableText) formData.append('table_text', tableText)
+      return apiFetch<EventAnalysis>(`/api/events/${id}/analyze`, {
+        method: 'POST',
+        body: formData,
+      })
     },
   })
 }

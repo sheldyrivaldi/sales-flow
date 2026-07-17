@@ -17,15 +17,22 @@ import (
 // KeywordService/ReportService without a real Hermes bridge. generateJSON is
 // meaningful for JSON-schema callers (ScoreService/PlaybookService/
 // KeywordService); chat is meaningful for ReportService (Chat, not
-// GenerateJSON, per ai.ReportGenerator). Either may be left nil if unused by
-// a given test.
+// GenerateJSON, per ai.ReportGenerator). generateJSONFromDocument additionally
+// makes this stub satisfy hermes.DocumentExtractor (profile_service_ingest_test.go's
+// PDF ingest tests) when set — left nil, GenerateJSONFromDocument reports
+// "not implemented", same non-support signal a real client lacking the
+// capability would never actually give (it always implements it), but keeps
+// this stub usable for tests that don't care about ingest at all. Any field
+// may be left nil if unused by a given test.
 type stubHermesClient struct {
-	generateJSON func(ctx context.Context, prompt string, schema any, sk hermes.SessionKey) (json.RawMessage, error)
-	chat         func(ctx context.Context, req hermes.ChatRequest) (hermes.ChatResponse, error)
-	configure    func(ctx context.Context, cfg hermes.ProviderConfig) error
+	generateJSON             func(ctx context.Context, prompt string, schema any, sk hermes.SessionKey) (json.RawMessage, error)
+	generateJSONFromDocument func(ctx context.Context, prompt, filename string, fileBytes []byte, schema any, sk hermes.SessionKey) (json.RawMessage, error)
+	chat                     func(ctx context.Context, req hermes.ChatRequest) (hermes.ChatResponse, error)
+	configure                func(ctx context.Context, cfg hermes.ProviderConfig) error
 }
 
 var _ hermes.Client = (*stubHermesClient)(nil)
+var _ hermes.DocumentExtractor = (*stubHermesClient)(nil)
 
 func (s *stubHermesClient) Chat(ctx context.Context, req hermes.ChatRequest) (hermes.ChatResponse, error) {
 	if s.chat != nil {
@@ -40,6 +47,13 @@ func (s *stubHermesClient) ChatStream(_ context.Context, _ hermes.ChatRequest) (
 
 func (s *stubHermesClient) GenerateJSON(ctx context.Context, prompt string, schema any, sk hermes.SessionKey) (json.RawMessage, error) {
 	return s.generateJSON(ctx, prompt, schema, sk)
+}
+
+func (s *stubHermesClient) GenerateJSONFromDocument(ctx context.Context, prompt, filename string, fileBytes []byte, schema any, sk hermes.SessionKey) (json.RawMessage, error) {
+	if s.generateJSONFromDocument != nil {
+		return s.generateJSONFromDocument(ctx, prompt, filename, fileBytes, schema, sk)
+	}
+	return nil, errors.New("not implemented")
 }
 
 func (s *stubHermesClient) Health(_ context.Context) (hermes.Capabilities, error) {

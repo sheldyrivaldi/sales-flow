@@ -146,7 +146,7 @@ func newTestScoreService(stub *stubHermesClient) (*ScoreService, *fakeScoreTende
 
 	tenderSvc := NewTenderService(tenderRepo, &fakeOutcomeRepo{}, NoopLearningHook())
 	prospectSvc := NewProspectService(prospectRepo, &fakeOutcomeRepo{}, NoopLearningHook())
-	profileSvc := NewProfileService(profileRepo, "", nil)
+	profileSvc := NewProfileService(profileRepo, "", nil, nil)
 	scorer := ai.NewScorer(stub, "sk-test")
 
 	svc := NewScoreService(scorer, scoreRepo, tenderSvc, prospectSvc, profileSvc)

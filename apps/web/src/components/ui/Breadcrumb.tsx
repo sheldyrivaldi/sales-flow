@@ -1,4 +1,5 @@
 import { ChevronRight } from 'lucide-react'
+import { Link } from 'react-router'
 import { cn } from '../../lib/cn'
 
 export interface BreadcrumbItem {
@@ -33,15 +34,15 @@ export default function Breadcrumb({ items, className }: BreadcrumbProps) {
                   {item.label}
                 </span>
               ) : item.href ? (
-                <a
-                  href={item.href}
+                <Link
+                  to={item.href}
                   className={cn(
                     'text-body text-fg-muted hover:text-fg transition-colors duration-150',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1 rounded'
                   )}
                 >
                   {item.label}
-                </a>
+                </Link>
               ) : (
                 <span className="text-body text-fg-muted">{item.label}</span>
               )}

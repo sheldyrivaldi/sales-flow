@@ -92,6 +92,18 @@ func (s *ChatService) GetConversation(ctx context.Context, id, ownerID string) (
 	return c, nil
 }
 
+// DeleteConversation removes a conversation (and its messages, via DB
+// cascade) if it belongs to ownerID.
+func (s *ChatService) DeleteConversation(ctx context.Context, id, ownerID string) error {
+	if err := s.repo.DeleteConversation(ctx, id, ownerID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return httperr.NewNotFound("percakapan tidak ditemukan")
+		}
+		return fmt.Errorf("chat.DeleteConversation: %w", err)
+	}
+	return nil
+}
+
 // ListConversations returns paginated conversations for ownerID.
 func (s *ChatService) ListConversations(ctx context.Context, ownerID string, page, pageSize int) ([]domain.Conversation, int64, error) {
 	page, pageSize = pagination.Normalize(page, pageSize)

@@ -72,7 +72,7 @@ func (s *ScoreService) ScoreTarget(ctx context.Context, targetType ai.ScoreTarge
 	}
 	duration := time.Since(start)
 
-	action := ai.RecommendAction(res.FitScore, res.NoGoTriggered, res.NeedPartner)
+	action := ai.RecommendAction(res.FitScore, res.NoGoTriggered, res.NeedPartner, profile.ScoringConfig)
 
 	evidenceJSON, err := json.Marshal(res.Evidence)
 	if err != nil {

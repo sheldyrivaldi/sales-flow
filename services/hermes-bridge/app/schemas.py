@@ -26,6 +26,11 @@ class ChatCompletionRequest(BaseModel):
     model: str = "default"
     messages: list[ChatMessage]
     stream: bool = False
+    # Optional document attachment for the LAST user message: PDFs are
+    # rendered to per-page images and sent as native multimodal vision
+    # content; images pass through directly (same pipeline as /v1/responses).
+    document_base64: str | None = None
+    document_filename: str | None = None
 
 
 class ResponseFormat(BaseModel):
@@ -36,6 +41,12 @@ class ResponseFormat(BaseModel):
 class ResponsesRequest(BaseModel):
     prompt: str
     response_format: ResponseFormat = Field(default_factory=ResponseFormat)
+    # Optional document attachment (EP-13 PDF ingest, vision-based
+    # extraction): when set, each page of the PDF is rendered to an image and
+    # sent alongside prompt as native multimodal vision input instead of
+    # relying on lossy externally-extracted text.
+    document_base64: str | None = None
+    document_filename: str | None = None
 
 
 class ProviderConfigRequest(BaseModel):

@@ -36,7 +36,7 @@ export const id = {
   // ── Navigasi (selaras navItems.ts) ────────────
   nav: {
     dashboard: 'Dashboard',
-    penemuanAi: 'Penemuan AI',
+    penemuanAi: 'Radar Tender',
     tenders: 'Tenders',
     events: 'Events',
     prospects: 'Prospects',

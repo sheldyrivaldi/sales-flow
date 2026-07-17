@@ -12,7 +12,7 @@ export default function Skeleton({ variant = 'rect', className }: SkeletonProps)
     <div
       aria-hidden="true"
       className={cn(
-        'animate-pulse bg-surface-subtle',
+        'skeleton-shimmer',
         variant === 'circle' ? 'rounded-pill' : 'rounded-btn',
         variant === 'text' ? 'h-4' : variant === 'rect' ? 'h-10' : 'w-10 h-10',
         className

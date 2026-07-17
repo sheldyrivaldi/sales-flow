@@ -6,6 +6,8 @@ import { apiFetch, buildQueryString } from '../lib/api'
 
 export type SourceAccess = 'publik' | 'login' | 'manual'
 
+export type SourceFrequency = 'harian' | '2-3x' | 'mingguan' | 'manual'
+
 export interface Source {
   id: string
   name: string
@@ -16,6 +18,8 @@ export interface Source {
   enabled: boolean
   priority: number
   preset_key: string | null
+  frequency: SourceFrequency
+  data_types: string[]
   created_at: string
   updated_at: string
 }
@@ -53,6 +57,8 @@ export interface SourceCreateBody {
   legal_note?: string
   enabled?: boolean
   priority?: number
+  frequency?: SourceFrequency
+  data_types?: string[]
 }
 
 export type SourceUpdateBody = Partial<SourceCreateBody>
@@ -61,6 +67,31 @@ export const ACCESS_LABELS: Record<SourceAccess, string> = {
   publik: 'Publik',
   login: 'Login',
   manual: 'Manual',
+}
+
+export const FREQUENCY_LABELS: Record<SourceFrequency, string> = {
+  harian: 'Harian',
+  '2-3x': '2-3x seminggu',
+  mingguan: 'Mingguan',
+  manual: 'Manual',
+}
+
+// PRIORITY_TIERS maps the labeled RFI §6.1 tiers (Rendah/Sedang/Tinggi) onto
+// the plain int Priority column (used as a crawl-order tiebreaker).
+export const PRIORITY_TIERS: { label: string; value: number }[] = [
+  { label: 'Rendah', value: 1 },
+  { label: 'Sedang', value: 5 },
+  { label: 'Tinggi', value: 10 },
+]
+
+export function priorityLabel(priority: number): string {
+  let closest = PRIORITY_TIERS[0]
+  for (const tier of PRIORITY_TIERS) {
+    if (Math.abs(tier.value - priority) < Math.abs(closest.value - priority)) {
+      closest = tier
+    }
+  }
+  return closest.label
 }
 
 // ── Query Hooks ───────────────────────────────────────────────────────────────

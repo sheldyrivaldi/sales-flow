@@ -38,8 +38,15 @@ type Source struct {
 	Enabled   bool         `json:"enabled"    gorm:"not null;default:false"`
 	Priority  int          `json:"priority"   gorm:"not null;default:0"`
 	PresetKey *string      `json:"preset_key" gorm:"column:preset_key"`
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
+	// Frequency is this source's own monitoring cadence (RFI §6.1), distinct
+	// from the profile-wide crawl_frequency: a high-priority government
+	// portal might be checked "harian" while an aggregator is only "2-3x" or
+	// "manual" (CAPTCHA/paywall — never auto-crawled regardless of this
+	// value; see filterCrawlableSources's Access-based compliance guard).
+	Frequency string    `json:"frequency"  gorm:"not null;default:'harian'"`
+	DataTypes []string  `json:"data_types" gorm:"column:data_types;serializer:json;type:jsonb"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (Source) TableName() string { return "source" }

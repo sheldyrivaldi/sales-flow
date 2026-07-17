@@ -1,13 +1,40 @@
 @import "@fontsource-variable/inter";
 @import "tailwindcss";
 @import "./styles/tokens.css";
+@import "./styles/animations.css";
+
+:root {
+  /* Gradasi khusus fitur AI — dipakai via .bg-ai-gradient (animations.css).
+     Bukan @theme token karena gradien tidak menghasilkan utility warna. */
+  --gradient-ai: linear-gradient(135deg, #10b981 0%, #14b8a6 50%, #06b6d4 100%);
+}
+
+/* ── Dark mode override ──
+   Tailwind v4 utilities membaca var(--color-*), jadi cukup override di sini.
+   Belum ada toggle di UI — blok ini menyiapkan fondasinya. */
+[data-theme="dark"],
+.dark {
+  --color-canvas: #0c1512;          /* dark slate, undertone emerald */
+  --color-surface: #1e293b;
+  --color-surface-muted: #172033;
+  --color-surface-subtle: #172033;
+  --color-line: #334155;
+  --color-line-strong: #475569;
+  --color-fg: #f1f5f9;
+  --color-fg-muted: #cbd5e1;
+  --color-fg-subtle: #64748b;
+  --color-primary: #10b981;         /* emerald-500 lebih terbaca di dark */
+  --color-primary-hover: #34d399;
+  --color-primary-subtle: rgba(16, 185, 129, 0.12);
+  --color-primary-border: rgba(16, 185, 129, 0.35);
+}
 
 @layer base {
   html {
     font-family: var(--font-sans);
   }
   body {
-    background: var(--color-surface-muted);
+    background: var(--color-canvas);
     color: var(--color-fg);
   }
 }

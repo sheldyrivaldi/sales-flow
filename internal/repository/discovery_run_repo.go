@@ -69,3 +69,20 @@ func (r *DiscoveryRunRepo) GetByCorrelationKey(ctx context.Context, key string) 
 	}
 	return &run, nil
 }
+
+// GetActive returns the newest pending/running run, or (nil, nil) when no
+// run is in flight — server-side single-flight guard for discovery triggers.
+func (r *DiscoveryRunRepo) GetActive(ctx context.Context) (*domain.DiscoveryRun, error) {
+	var run domain.DiscoveryRun
+	err := r.db.WithContext(ctx).
+		Where("status IN ?", []string{string(domain.DiscoveryStatusPending), string(domain.DiscoveryStatusRunning)}).
+		Order("started_at DESC").
+		First(&run).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("discoveryRun.GetActive: %w", err)
+	}
+	return &run, nil
+}

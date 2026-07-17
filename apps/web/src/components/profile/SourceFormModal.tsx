@@ -5,9 +5,16 @@ import Field from '../ui/Field'
 import Input from '../ui/Input'
 import Select from '../ui/Select'
 import Button from '../ui/Button'
+import ChipInput from '../ui/ChipInput'
 import { toast } from '../../lib/toast'
-import { useCreateSource, useUpdateSource, ACCESS_LABELS } from '../../api/sources'
-import type { Source, SourceAccess } from '../../api/sources'
+import {
+  useCreateSource,
+  useUpdateSource,
+  ACCESS_LABELS,
+  FREQUENCY_LABELS,
+  PRIORITY_TIERS,
+} from '../../api/sources'
+import type { Source, SourceAccess, SourceFrequency } from '../../api/sources'
 
 export interface SourceFormModalProps {
   open: boolean
@@ -21,9 +28,21 @@ interface FormState {
   country: string
   access: SourceAccess
   legalNote: string
+  priority: number
+  frequency: SourceFrequency
+  dataTypes: string[]
 }
 
-const emptyForm: FormState = { name: '', url: '', country: '', access: 'publik', legalNote: '' }
+const emptyForm: FormState = {
+  name: '',
+  url: '',
+  country: '',
+  access: 'publik',
+  legalNote: '',
+  priority: PRIORITY_TIERS[1].value,
+  frequency: 'harian',
+  dataTypes: [],
+}
 
 function sourceToForm(s: Source): FormState {
   return {
@@ -32,6 +51,9 @@ function sourceToForm(s: Source): FormState {
     country: s.country ?? '',
     access: s.access,
     legalNote: s.legal_note ?? '',
+    priority: s.priority,
+    frequency: s.frequency,
+    dataTypes: s.data_types,
   }
 }
 
@@ -76,6 +98,9 @@ export default function SourceFormModal({ open, onClose, source }: SourceFormMod
       country: form.country || undefined,
       access: form.access,
       legal_note: form.legalNote || undefined,
+      priority: form.priority,
+      frequency: form.frequency,
+      data_types: form.dataTypes,
     }
     try {
       if (isEdit && source) {
@@ -134,6 +159,37 @@ export default function SourceFormModal({ open, onClose, source }: SourceFormMod
         </Field>
         <Field label="Legal note" htmlFor={`${titleId}-legal`}>
           <Input id={`${titleId}-legal`} value={form.legalNote} onChange={set('legalNote')} />
+        </Field>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Prioritas" htmlFor={`${titleId}-priority`}>
+            <Select
+              id={`${titleId}-priority`}
+              value={form.priority}
+              onChange={(e) => setForm((f) => ({ ...f, priority: Number(e.target.value) }))}
+            >
+              {PRIORITY_TIERS.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Frekuensi" htmlFor={`${titleId}-frequency`}>
+            <Select
+              id={`${titleId}-frequency`}
+              value={form.frequency}
+              onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value as typeof form.frequency }))}
+            >
+              {(Object.keys(FREQUENCY_LABELS) as (typeof form.frequency)[]).map((f) => (
+                <option key={f} value={f}>
+                  {FREQUENCY_LABELS[f]}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <Field label="Jenis data" helper="Tender pemerintah, RFP/RFQ, pengumuman lelang…">
+          <ChipInput value={form.dataTypes} onChange={(v) => setForm((f) => ({ ...f, dataTypes: v }))} />
         </Field>
       </div>
     </Modal>

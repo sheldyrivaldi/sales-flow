@@ -126,19 +126,29 @@ async function rawFetch(path: string, init: RequestInit = {}, withAuth = true): 
 
 // ---- Public fetch wrapper -------------------------------------------------
 
+// parseJsonBody handles 204/empty-body responses (every DELETE handler in
+// this API returns 204 No Content) — Response.json() on an empty body throws
+// SyntaxError, which would otherwise make every successful delete look like
+// a failed mutation to callers.
+async function parseJsonBody<T>(res: Response): Promise<T> {
+  if (res.status === 204) return undefined as T
+  const text = await res.text()
+  return (text ? JSON.parse(text) : undefined) as T
+}
+
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isAuthPath = AUTH_PATHS.some((p) => path.startsWith(p))
 
   try {
     const res = await rawFetch(path, init, !isAuthPath)
-    return res.json() as Promise<T>
+    return parseJsonBody<T>(res)
   } catch (err) {
     if (err instanceof ApiError && err.status === 401 && !isAuthPath) {
       await ensureRefreshed()
       try {
         // retry once with fresh token
         const res = await rawFetch(path, init, true)
-        return res.json() as Promise<T>
+        return parseJsonBody<T>(res)
       } catch (retryErr) {
         if (retryErr instanceof ApiError && retryErr.status === 401) {
           onUnauthorized()

@@ -74,3 +74,87 @@ def test_responses_no_auth():
         json={"prompt": "test", "response_format": {"type": "json_schema", "json_schema": {"schema": {}}}},
     )
     assert r.status_code == 401
+
+
+def test_responses_with_document_sends_multimodal_content():
+    """When document_base64 is set, agent.chat must receive a list — text
+    prompt first, then one image_url part per rendered page — not the plain
+    string path (EP-13 vision-based PDF ingest)."""
+    captured: dict = {}
+
+    def fake_build(**kwargs):
+        agent = MagicMock()
+
+        def fake_chat(content):
+            captured["content"] = content
+            return '{"company_name": "PT Contoh"}'
+
+        agent.chat.side_effect = fake_chat
+        return agent
+
+    with patch("app.routes.responses.build_agent", side_effect=fake_build), \
+         patch("app.routes.responses.render_pdf_pages_to_data_urls", return_value=["data:image/jpeg;base64,AAA", "data:image/jpeg;base64,BBB"]):
+        from app.main import app
+        client = TestClient(app)
+        r = client.post(
+            "/v1/responses",
+            json={
+                "prompt": "Ekstrak profil perusahaan",
+                "response_format": {"type": "json_schema", "json_schema": {"schema": {}}},
+                "document_base64": "ZmFrZS1wZGYtYnl0ZXM=",
+                "document_filename": "profile.pdf",
+            },
+            headers=HEADERS,
+        )
+
+    assert r.status_code == 200
+    assert r.json()["output_text"] == '{"company_name": "PT Contoh"}'
+
+    content = captured["content"]
+    assert isinstance(content, list)
+    assert content[0] == {"type": "text", "text": "Ekstrak profil perusahaan"}
+    assert content[1] == {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAA"}}
+    assert content[2] == {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,BBB"}}
+
+
+def test_responses_without_document_sends_plain_string():
+    """Backward-compat: no document_base64 → content is still the bare
+    prompt string, exactly as before this feature existed."""
+    captured: dict = {}
+
+    def fake_build(**kwargs):
+        agent = MagicMock()
+
+        def fake_chat(content):
+            captured["content"] = content
+            return '{"ok": true}'
+
+        agent.chat.side_effect = fake_chat
+        return agent
+
+    with patch("app.routes.responses.build_agent", side_effect=fake_build):
+        from app.main import app
+        client = TestClient(app)
+        client.post(
+            "/v1/responses",
+            json={"prompt": "test tanpa dokumen", "response_format": {"type": "json_schema", "json_schema": {"schema": {}}}},
+            headers=HEADERS,
+        )
+
+    assert captured["content"] == "test tanpa dokumen"
+
+
+def test_responses_invalid_document_base64_returns_400():
+    with patch("app.routes.responses.build_agent", return_value=_fake_agent('{"ok": true}')):
+        from app.main import app
+        client = TestClient(app)
+        r = client.post(
+            "/v1/responses",
+            json={
+                "prompt": "test",
+                "response_format": {"type": "json_schema", "json_schema": {"schema": {}}},
+                "document_base64": "not-valid-base64!!!",
+            },
+            headers=HEADERS,
+        )
+    assert r.status_code == 400

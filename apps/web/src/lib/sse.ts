@@ -6,6 +6,13 @@ export interface ToolCallEvent {
   arguments: unknown
 }
 
+/** Lampiran dokumen (PDF/gambar) yang dikirim bersama pesan chat. */
+export interface ChatAttachment {
+  name: string
+  /** Isi file dalam base64 murni (tanpa prefix data URL). */
+  base64: string
+}
+
 export type ChatStreamEvent =
   | { type: 'delta'; content: string }
   | ({ type: 'tool_call' } & ToolCallEvent)
@@ -24,6 +31,7 @@ export async function streamChat(
   content: string,
   handlers: ChatStreamHandlers,
   signal?: AbortSignal,
+  attachment?: ChatAttachment,
 ): Promise<void> {
   const doFetch = () =>
     fetch(`/api/conversations/${conversationId}/chat`, {
@@ -32,7 +40,11 @@ export async function streamChat(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${currentAccessToken() ?? ''}`,
       },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({
+        content,
+        attachment_name: attachment?.name,
+        attachment_base64: attachment?.base64,
+      }),
       signal,
     })
 

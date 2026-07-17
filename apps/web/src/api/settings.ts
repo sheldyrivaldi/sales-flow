@@ -97,3 +97,30 @@ export function useTestAISetting() {
     mutationFn: () => apiFetch<AISettingTestResult>('/api/settings/ai/test', { method: 'POST' }),
   })
 }
+
+// ── Hermes TUI (admin-only native Hermes CLI/TUI console) ──────────────────
+// A ticket → session-cookie handoff, then a reverse proxy into ttyd — the
+// frontend never renders a terminal itself; tui_url points at ttyd's own
+// unmodified page, loaded in an iframe/new tab. See backend plan for the
+// full connection lifecycle this is the browser side of.
+
+export interface HermesTuiTicket {
+  ticket: string
+  expires_in: number
+  tui_url: string
+}
+
+/** Mints a fresh, single-use, ~30s ticket — call this immediately before
+ * navigating to tui_url (iframe src or window.open), never reuse the
+ * result across two navigations. */
+export function useIssueHermesTuiTicket() {
+  return useMutation({
+    mutationFn: () => apiFetch<HermesTuiTicket>('/api/admin/hermes/tui/ticket', { method: 'POST' }),
+  })
+}
+
+export function useEndHermesTuiSession() {
+  return useMutation({
+    mutationFn: () => apiFetch<{ status: string }>('/api/admin/hermes/tui/end', { method: 'POST' }),
+  })
+}

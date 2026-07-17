@@ -37,7 +37,7 @@ export default function Drawer({
     <div className="fixed inset-0 z-50 flex">
       {/* Overlay */}
       <div
-        className="absolute inset-0 bg-fg/40"
+        className="absolute inset-0 bg-fg/40 animate-backdrop-in"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -49,9 +49,9 @@ export default function Drawer({
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
         className={cn(
-          'relative z-10 flex flex-col bg-surface shadow-subtle h-full max-w-full',
+          'relative z-10 flex flex-col bg-surface shadow-lg h-full max-w-full',
           width,
-          side === 'right' ? 'ml-auto' : 'mr-auto',
+          side === 'right' ? 'ml-auto animate-drawer-in-right' : 'mr-auto animate-drawer-in-left',
           className
         )}
       >

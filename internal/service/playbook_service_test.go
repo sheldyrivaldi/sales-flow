@@ -53,6 +53,16 @@ func (r *fakePlaybookRepo) GetLatestVersion(_ context.Context, targetType, targe
 	return max, nil
 }
 
+func (r *fakePlaybookRepo) ListByTargetType(_ context.Context, targetType string) ([]domain.Playbook, error) {
+	var out []domain.Playbook
+	for _, p := range r.rows {
+		if p.TargetType == targetType {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
 func newTestPlaybookService(stub *stubHermesClient) (*PlaybookService, *fakeScoreTenderRepo, *fakeScoreProspectRepo, *fakePlaybookRepo) {
 	tenderRepo := &fakeScoreTenderRepo{items: map[string]domain.Tender{}}
 	prospectRepo := &fakeScoreProspectRepo{items: map[string]domain.Prospect{}}
@@ -61,7 +71,7 @@ func newTestPlaybookService(stub *stubHermesClient) (*PlaybookService, *fakeScor
 
 	tenderSvc := NewTenderService(tenderRepo, &fakeOutcomeRepo{}, NoopLearningHook())
 	prospectSvc := NewProspectService(prospectRepo, &fakeOutcomeRepo{}, NoopLearningHook())
-	profileSvc := NewProfileService(profileRepo, "", nil)
+	profileSvc := NewProfileService(profileRepo, "", nil, nil)
 	gen := ai.NewPlaybookGenerator(stub, "sk-test")
 
 	svc := NewPlaybookService(gen, playbookRepo, tenderSvc, prospectSvc, profileSvc)

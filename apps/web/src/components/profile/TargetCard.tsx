@@ -3,9 +3,17 @@ import { Info } from 'lucide-react'
 import Card, { CardHeader, CardBody } from '../ui/Card'
 import Field from '../ui/Field'
 import Input from '../ui/Input'
+import Select from '../ui/Select'
 import ChipInput from '../ui/ChipInput'
 import Tooltip from '../ui/Tooltip'
-import { COUNTRY_PRESETS, INDUSTRY_PRESETS, PROCUREMENT_TYPE_PRESETS } from '../../lib/profilePresets'
+import {
+  COUNTRY_PRESETS,
+  INDUSTRY_PRESETS,
+  PROCUREMENT_TYPE_PRESETS,
+  DOCUMENT_LANGUAGE_PRESETS,
+  WORK_MODEL_OPTIONS,
+  DECISION_MAKER_PRESETS,
+} from '../../lib/profilePresets'
 import type { OtakAgentFormState, OtakAgentFormPatch } from './types'
 
 export interface TargetCardProps {
@@ -49,7 +57,7 @@ export default function TargetCard({ form, onChange, disabled, valueMinError }: 
           />
         </Field>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <Field label="Nilai min" required htmlFor={`${titleId}-value-min`} helper="Rp" error={valueMinError}>
             <Input
               id={`${titleId}-value-min`}
@@ -68,6 +76,16 @@ export default function TargetCard({ form, onChange, disabled, valueMinError }: 
               min="0"
               value={form.valueIdeal}
               onChange={(e) => onChange({ valueIdeal: e.target.value })}
+              disabled={disabled}
+            />
+          </Field>
+          <Field label="Nilai maks" htmlFor={`${titleId}-value-max`} helper="Rp">
+            <Input
+              id={`${titleId}-value-max`}
+              type="number"
+              min="0"
+              value={form.valueMax}
+              onChange={(e) => onChange({ valueMax: e.target.value })}
               disabled={disabled}
             />
           </Field>
@@ -90,6 +108,65 @@ export default function TargetCard({ form, onChange, disabled, valueMinError }: 
             presets={PROCUREMENT_TYPE_PRESETS}
             disabled={disabled}
             placeholder="Tambah jenis…"
+          />
+        </Field>
+
+        <Field label="Ukuran buyer" htmlFor={`${titleId}-buyer-size`} helper="Revenue min, jumlah karyawan, atau skala operasi">
+          <Input
+            id={`${titleId}-buyer-size`}
+            value={form.buyerSizeNote}
+            onChange={(e) => onChange({ buyerSizeNote: e.target.value })}
+            disabled={disabled}
+            placeholder="mis. Revenue ≥ Rp 30 miliar"
+          />
+        </Field>
+
+        <Field label="Bahasa dokumen tender">
+          <ChipInput
+            value={form.documentLanguages}
+            onChange={(v) => onChange({ documentLanguages: v })}
+            presets={DOCUMENT_LANGUAGE_PRESETS}
+            disabled={disabled}
+            placeholder="Tambah bahasa…"
+          />
+        </Field>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Model kerja" htmlFor={`${titleId}-work-model`}>
+            <Select
+              id={`${titleId}-work-model`}
+              value={form.workModel}
+              onChange={(e) => onChange({ workModel: e.target.value })}
+              disabled={disabled}
+            >
+              <option value="">— Pilih —</option>
+              {WORK_MODEL_OPTIONS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          {form.workModel && form.workModel !== 'Remote' && (
+            <Field label="Batasan onsite" htmlFor={`${titleId}-onsite-limit`}>
+              <Input
+                id={`${titleId}-onsite-limit`}
+                value={form.onsiteLimitNote}
+                onChange={(e) => onChange({ onsiteLimitNote: e.target.value })}
+                disabled={disabled}
+                placeholder="mis. maks 2 hari/minggu, Jabodetabek"
+              />
+            </Field>
+          )}
+        </div>
+
+        <Field label="Target decision maker" helper="Peran yang dituju untuk contact enrichment">
+          <ChipInput
+            value={form.decisionMakerRoles}
+            onChange={(v) => onChange({ decisionMakerRoles: v })}
+            presets={DECISION_MAKER_PRESETS}
+            disabled={disabled}
+            placeholder="Tambah peran…"
           />
         </Field>
       </CardBody>

@@ -81,7 +81,7 @@ export default function ProspectDrawer({ open, onClose, prospectId }: ProspectDr
         stage: outcomeTarget,
         notes: outcomeNotes || undefined,
       })
-      toast.success(`Prospek ditandai ${outcomeTarget}. AI akan belajar dari hasil ini.`)
+      toast.success(`Prospek ditandai ${outcomeTarget} dan hasilnya dipelajari AI.`)
     } catch {
       // onError hook sudah menampilkan toast.error
     } finally {

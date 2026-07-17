@@ -111,6 +111,30 @@ func TestBuildScoringPrompt_ContainsTargetAndNoGoAndWeights(t *testing.T) {
 	}
 }
 
+func TestBuildScoringPrompt_UsesConfiguredWeights(t *testing.T) {
+	profile := sampleProfile()
+	profile.ScoringConfig = &domain.ScoringConfig{
+		WeightCapabilityFit:             42,
+		WeightPortfolioMatch:            15,
+		WeightCommercialAttractiveness:  15,
+		WeightEligibilityFit:            15,
+		WeightDeadlineFeasibility:       10,
+		WeightStrategicAccountValue:     1,
+		WeightDeliveryRisk:              1,
+		WeightCompetitionWinProbability: 1,
+	}
+
+	in := ScoreInputFromTender(domain.Tender{Title: "T", BuyerName: strPtr("B")}, profile)
+	prompt := buildScoringPrompt(in)
+
+	if !strings.Contains(prompt, "Capability fit (cocok kapabilitas utama) — bobot 42%") {
+		t.Errorf("prompt did not use configured Capability fit weight (42%%):\n%s", prompt)
+	}
+	if strings.Contains(prompt, "bobot 20%") {
+		t.Error("prompt still contains the default 20% weight instead of the configured one")
+	}
+}
+
 func TestScoreInputFromProspect(t *testing.T) {
 	in := ScoreInputFromProspect(domain.Prospect{
 		Name:    "Prospek A",

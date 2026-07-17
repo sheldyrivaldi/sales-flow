@@ -53,6 +53,18 @@ func NewScheduler(profiles ProfileFetcher, runner RunTrigger, tickInterval time.
 	return &Scheduler{profiles: profiles, runner: runner, tickInterval: tickInterval}
 }
 
+// TriggerIfDue runs one check-and-maybe-trigger pass immediately, using the
+// exact same logic (and period-bucketed idempotency key) as a periodic tick.
+// Exported for an external trigger (EP-12: the Hermes cron job upserted on
+// profile save calls back into POST /internal/discovery/trigger) to ask for
+// a run right now — since it shares tick's key computation, a run this
+// causes and one the periodic ticker causes in the same period collapse into
+// a single DiscoveryService.RunAsync call via that method's own
+// correlation-key idempotency, never a double crawl.
+func (s *Scheduler) TriggerIfDue(ctx context.Context) {
+	s.tick(ctx, time.Now())
+}
+
 // Start runs the check loop until ctx is canceled — the only way to stop it.
 // Intended to be launched in its own goroutine by apps/api/main.go.
 func (s *Scheduler) Start(ctx context.Context) {

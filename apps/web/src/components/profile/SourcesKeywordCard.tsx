@@ -5,10 +5,17 @@ import ChipInput from '../ui/ChipInput'
 import Button from '../ui/Button'
 import Badge from '../ui/Badge'
 import Select from '../ui/Select'
+import Toggle from '../ui/Toggle'
 import Tooltip from '../ui/Tooltip'
 import { useKeywordGeneration } from '../../lib/useKeywordGeneration'
 import { dedupCaseInsensitive } from '../../lib/dedup'
 import type { OtakAgentFormState, OtakAgentFormPatch } from './types'
+
+const CRAWL_FREQUENCY_OPTIONS: { value: string; label: string }[] = [
+  { value: 'harian', label: 'Harian' },
+  { value: '2-3x', label: '2-3x seminggu' },
+  { value: 'mingguan', label: 'Mingguan' },
+]
 
 export interface SourcesKeywordCardProps {
   form: OtakAgentFormState
@@ -76,10 +83,30 @@ export default function SourcesKeywordCard({ form, onChange, disabled }: Sources
           />
         </Field>
 
-        <Field label="Frekuensi crawl" helper="Diatur saat discovery aktif (EP-12)">
-          <Select disabled>
-            <option>Harian</option>
-          </Select>
+        <Field
+          label="Crawl otomatis"
+          helper="Jadwal disinkronkan ke penjadwal AI saat disimpan — berjalan otomatis tanpa perlu dipicu manual."
+        >
+          <div className="flex items-center gap-3">
+            <Toggle
+              checked={form.crawlEnabled}
+              onChange={(checked) => onChange({ crawlEnabled: checked })}
+              label={form.crawlEnabled ? 'Aktif' : 'Nonaktif'}
+              disabled={disabled}
+            />
+            <Select
+              value={form.crawlFrequency}
+              onChange={(e) => onChange({ crawlFrequency: e.target.value })}
+              disabled={disabled || !form.crawlEnabled}
+              className="max-w-[10rem]"
+            >
+              {CRAWL_FREQUENCY_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </Select>
+          </div>
         </Field>
       </CardBody>
     </Card>

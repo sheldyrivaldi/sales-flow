@@ -85,3 +85,84 @@ def test_chat_empty_messages():
         headers=HEADERS,
     )
     assert r.status_code == 422
+
+
+def test_chat_with_document_builds_multimodal_user_message():
+    """document_base64 → pesan user terakhir menjadi list [text, image parts];
+    history tetap string biasa."""
+    captured: dict = {}
+
+    def fake_build(**kwargs):
+        agent = MagicMock()
+
+        def fake_run(user_message, **run_kwargs):
+            captured["user_message"] = user_message
+            captured["history"] = run_kwargs.get("conversation_history")
+            return {"final_response": "Isi dokumen sudah saya baca.", "messages": []}
+
+        agent.run_conversation.side_effect = fake_run
+        return agent
+
+    with patch("app.routes.chat.build_agent", side_effect=fake_build), \
+         patch("app.routes.chat.render_pdf_pages_to_data_urls", return_value=["data:image/jpeg;base64,AAA"]):
+        from app.main import app
+        client = TestClient(app)
+        r = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "default",
+                "messages": [
+                    {"role": "user", "content": "halo"},
+                    {"role": "assistant", "content": "hai"},
+                    {"role": "user", "content": "baca dokumen ini"},
+                ],
+                "stream": False,
+                "document_base64": "ZmFrZS1wZGY=",
+                "document_filename": "penawaran.pdf",
+            },
+            headers=HEADERS,
+        )
+
+    assert r.status_code == 200
+    msg = captured["user_message"]
+    assert isinstance(msg, list)
+    assert msg[0] == {"type": "text", "text": "baca dokumen ini"}
+    assert msg[1] == {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,AAA"}}
+    assert captured["history"] == [
+        {"role": "user", "content": "halo"},
+        {"role": "assistant", "content": "hai"},
+    ]
+
+
+def test_chat_with_image_attachment_passes_through_without_render():
+    captured: dict = {}
+
+    def fake_build(**kwargs):
+        agent = MagicMock()
+
+        def fake_run(user_message, **run_kwargs):
+            captured["user_message"] = user_message
+            return {"final_response": "Gambar diterima.", "messages": []}
+
+        agent.run_conversation.side_effect = fake_run
+        return agent
+
+    with patch("app.routes.chat.build_agent", side_effect=fake_build):
+        from app.main import app
+        client = TestClient(app)
+        r = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "default",
+                "messages": [{"role": "user", "content": "lihat screenshot ini"}],
+                "stream": False,
+                "document_base64": "aW1hZ2UtYnl0ZXM=",
+                "document_filename": "layar.png",
+            },
+            headers=HEADERS,
+        )
+
+    assert r.status_code == 200
+    msg = captured["user_message"]
+    assert isinstance(msg, list)
+    assert msg[1]["image_url"]["url"].startswith("data:image/png;base64,")

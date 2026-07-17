@@ -111,6 +111,13 @@ type DiscoverInput struct {
 	Sources  []domain.Source
 	Keywords []string
 	Target   *domain.TargetCriteria
+	// Products, Vision, Mission come straight from the current Company
+	// Profile (EP-18-ish profile revamp) and are injected into the discovery
+	// prompt so the agent judges relevance against what the company actually
+	// sells and aims for, not just keywords/target criteria.
+	Products []string
+	Vision   *string
+	Mission  *string
 }
 
 // Crawler is the seam between the discovery orchestrator and however
@@ -186,7 +193,7 @@ func (c *hermesCrawler) Discover(ctx context.Context, in DiscoverInput) ([]Candi
 				return all, err
 			}
 		}
-		candidates, err := c.discoverSourceWithRetry(ctx, src, in.Keywords, in.Target)
+		candidates, err := c.discoverSourceWithRetry(ctx, src, in)
 		if err != nil {
 			return all, fmt.Errorf("hermesCrawler.Discover: source %q: %w", src.Name, err)
 		}
@@ -199,7 +206,7 @@ func (c *hermesCrawler) Discover(ctx context.Context, in DiscoverInput) ([]Candi
 // waiting an exponentially increasing backoff (capped at 8x minInterval)
 // between attempts. Every wait is ctx-aware so a canceled run stops
 // promptly instead of blocking through a long backoff.
-func (c *hermesCrawler) discoverSourceWithRetry(ctx context.Context, src domain.Source, keywords []string, target *domain.TargetCriteria) ([]CandidateTender, error) {
+func (c *hermesCrawler) discoverSourceWithRetry(ctx context.Context, src domain.Source, in DiscoverInput) ([]CandidateTender, error) {
 	var lastErr error
 	for attempt := 1; attempt <= c.maxRetries+1; attempt++ {
 		if attempt > 1 {
@@ -207,7 +214,7 @@ func (c *hermesCrawler) discoverSourceWithRetry(ctx context.Context, src domain.
 				return nil, err
 			}
 		}
-		candidates, err := c.discoverSourceOnce(ctx, src, keywords, target)
+		candidates, err := c.discoverSourceOnce(ctx, src, in)
 		if err == nil {
 			return candidates, nil
 		}
@@ -218,8 +225,15 @@ func (c *hermesCrawler) discoverSourceWithRetry(ctx context.Context, src domain.
 
 // discoverSourceOnce runs exactly one Chat+GenerateJSON round trip for a
 // single source.
-func (c *hermesCrawler) discoverSourceOnce(ctx context.Context, src domain.Source, keywords []string, target *domain.TargetCriteria) ([]CandidateTender, error) {
-	prompt := buildDiscoveryPrompt(DiscoverInput{Sources: []domain.Source{src}, Keywords: keywords, Target: target})
+func (c *hermesCrawler) discoverSourceOnce(ctx context.Context, src domain.Source, in DiscoverInput) ([]CandidateTender, error) {
+	prompt := buildDiscoveryPrompt(DiscoverInput{
+		Sources:  []domain.Source{src},
+		Keywords: in.Keywords,
+		Target:   in.Target,
+		Products: in.Products,
+		Vision:   in.Vision,
+		Mission:  in.Mission,
+	})
 
 	resp, err := c.hc.Chat(ctx, hermes.ChatRequest{
 		Messages:   []hermes.Message{{Role: "user", Content: prompt}},
@@ -278,6 +292,20 @@ func buildDiscoveryPrompt(in DiscoverInput) string {
 	var b strings.Builder
 	b.WriteString("Kamu adalah agent yang mencari tender/pengadaan dari sumber resmi berikut. ")
 	b.WriteString("Gunakan tool pencarian/browsing yang tersedia untuk mengunjungi tiap sumber dan cari tender yang relevan dengan kata kunci.\n\n")
+
+	if len(in.Products) > 0 || (in.Vision != nil && *in.Vision != "") || (in.Mission != nil && *in.Mission != "") {
+		b.WriteString("## Profil perusahaan (pakai ini untuk menilai relevansi tender, bukan hanya kata kunci)\n")
+		if len(in.Products) > 0 {
+			fmt.Fprintf(&b, "- Produk/layanan: %s\n", strings.Join(in.Products, ", "))
+		}
+		if in.Vision != nil && *in.Vision != "" {
+			fmt.Fprintf(&b, "- Visi: %s\n", *in.Vision)
+		}
+		if in.Mission != nil && *in.Mission != "" {
+			fmt.Fprintf(&b, "- Misi: %s\n", *in.Mission)
+		}
+		b.WriteString("\n")
+	}
 
 	b.WriteString("## Sumber (kunjungi HANYA ini, urut prioritas)\n")
 	for _, s := range in.Sources {
@@ -396,6 +424,20 @@ func (o *DiscoveryOrchestrator) writeSourceAudit(ctx context.Context, action str
 // the §9 compliance guard (filterCrawlableSources — only "publik" sources
 // ever reach the crawler; "login"/"manual" are marked via audit_log and
 // skipped, never bypassed), and asks the crawler to search the crawlable set.
+// CrawlableSources returns the enabled+public sources a run would actually
+// crawl — exposed so DiscoveryService can refuse to start a run when there
+// is nothing to crawl (instead of "succeeding" in milliseconds with zero
+// results and no explanation).
+func (o *DiscoveryOrchestrator) CrawlableSources(ctx context.Context) ([]domain.Source, error) {
+	enabled := true
+	sources, _, err := o.sources.List(ctx, domain.SourceFilter{Enabled: &enabled}, 1, 1000)
+	if err != nil {
+		return nil, fmt.Errorf("discovery.CrawlableSources: %w", err)
+	}
+	crawlable, _ := filterCrawlableSources(sources)
+	return crawlable, nil
+}
+
 func (o *DiscoveryOrchestrator) CollectCandidates(ctx context.Context) ([]CandidateTender, []domain.Source, error) {
 	profile, err := o.profiles.GetCurrent(ctx)
 	if err != nil {
@@ -420,6 +462,9 @@ func (o *DiscoveryOrchestrator) CollectCandidates(ctx context.Context) ([]Candid
 		Sources:  crawlable,
 		Keywords: keywords,
 		Target:   profile.Target,
+		Products: profile.Profile.Products,
+		Vision:   profile.Profile.Vision,
+		Mission:  profile.Profile.Mission,
 	})
 	if err != nil {
 		return nil, sources, fmt.Errorf("discovery.CollectCandidates: crawl: %w", err)

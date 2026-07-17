@@ -50,4 +50,8 @@ type DiscoveryRunRepository interface {
 	// "no existing run" is a normal state, not an error (mirrors
 	// ProspectScoreRepository.GetLatest).
 	GetByCorrelationKey(ctx context.Context, key string) (*DiscoveryRun, error)
+	// GetActive returns the newest run still in pending/running state, or
+	// (nil, nil) when none is in flight — the server-side single-flight
+	// guard so a long crawl can't be triggered berkali-kali (by any user).
+	GetActive(ctx context.Context) (*DiscoveryRun, error)
 }

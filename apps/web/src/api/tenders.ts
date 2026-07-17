@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiFetch, buildQueryString } from '../lib/api'
+import { AI_MUTATION_KEYS } from '../lib/aiMutation'
+import type { AIMutationMeta } from '../lib/aiMutation'
 import type { RecommendedAction } from '../lib/score'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -217,5 +219,57 @@ export function useReviewTender() {
       queryClient.invalidateQueries({ queryKey: ['tender', id] })
       queryClient.invalidateQueries({ queryKey: ['discovery-inbox'] })
     },
+  })
+}
+
+// ── Tender Assist: ceklis dokumen & draf proposal (on-demand AI) ─────────────
+
+export type DocChecklistStatus = 'tersedia' | 'perlu_verifikasi' | 'belum_ada'
+
+export interface DocChecklistItem {
+  document: string
+  required: boolean
+  status: DocChecklistStatus
+  suggestion: string
+}
+
+export interface DocChecklist {
+  items: DocChecklistItem[]
+  readiness_score: number
+  summary: string
+}
+
+export interface ProposalSection {
+  title: string
+  content: string
+}
+
+export interface ProposalDraft {
+  title: string
+  sections: ProposalSection[]
+  disclaimer: string
+}
+
+export function useDocChecklist() {
+  return useMutation({
+    mutationKey: [...AI_MUTATION_KEYS.docChecklist],
+    meta: {
+      successToast: 'Pemeriksaan kelengkapan dokumen selesai.',
+      errorToast: 'Pemeriksaan dokumen gagal, coba lagi nanti.',
+    } satisfies AIMutationMeta,
+    mutationFn: (tenderId: string) =>
+      apiFetch<DocChecklist>(`/api/tenders/${tenderId}/doc-checklist`, { method: 'POST' }),
+  })
+}
+
+export function useProposalDraft() {
+  return useMutation({
+    mutationKey: [...AI_MUTATION_KEYS.proposal],
+    meta: {
+      successToast: 'Draf proposal selesai dibuat.',
+      errorToast: 'Generate proposal gagal, coba lagi nanti.',
+    } satisfies AIMutationMeta,
+    mutationFn: (tenderId: string) =>
+      apiFetch<ProposalDraft>(`/api/tenders/${tenderId}/proposal-draft`, { method: 'POST' }),
   })
 }

@@ -5,13 +5,18 @@ import {
   FileText,
   Calendar,
   Users,
+  UserCog,
   BookOpen,
   BarChart3,
   MessageSquare,
-  Brain,
   Settings,
 } from 'lucide-react'
 import type { Capability } from '../lib/rbac'
+
+export interface NavSubItem {
+  path: string
+  label: string
+}
 
 export interface NavItem {
   path: string
@@ -20,17 +25,25 @@ export interface NavItem {
   badge?: 'ai' | 'count'
   dividerBefore?: boolean
   capability?: Capability
+  /** Sub-items rendered nested under this item in the sidebar (expand/collapse). */
+  children?: NavSubItem[]
 }
 
 export const navItems: NavItem[] = [
   { path: '/',            label: 'Dashboard',   icon: LayoutDashboard },
-  { path: '/discovery',  label: 'Penemuan AI', icon: Sparkles,      badge: 'count', capability: 'RunDiscovery' },
+  { path: '/discovery',  label: 'Radar Tender', icon: Sparkles,      badge: 'count', capability: 'RunDiscovery' },
   { path: '/tenders',    label: 'Tenders',      icon: FileText },
   { path: '/events',     label: 'Events',       icon: Calendar },
-  { path: '/prospects',  label: 'Prospects',    icon: Users },
+  { path: '/prospects',  label: 'Pipeline',     icon: Users },
   { path: '/playbooks',  label: 'Playbooks',    icon: BookOpen },
   { path: '/reports',    label: 'Reports',      icon: BarChart3 },
   { path: '/chat',       label: 'Chat',         icon: MessageSquare, badge: 'ai' },
-  { path: '/otak-agent', label: 'Otak Agent',   icon: Brain,         dividerBefore: true, capability: 'EditProfile' },
-  { path: '/settings',   label: 'Settings',     icon: Settings },
+  { path: '/users',      label: 'User Management', icon: UserCog,    dividerBefore: true, capability: 'ManageUsers' },
+  {
+    path: '/settings', label: 'Settings', icon: Settings,
+    children: [
+      { path: '/settings/profile', label: 'Profile' },
+      { path: '/settings/ai-agent', label: 'AI Agent' },
+    ],
+  },
 ]

@@ -55,6 +55,13 @@ func loadCurrent(tx *gorm.DB) (*domain.ProfileAggregate, error) {
 	}
 	agg.Keywords = keywords
 
+	var scoring domain.ScoringConfig
+	if err := tx.First(&scoring, "profile_id = ?", cp.ID).Error; err == nil {
+		agg.ScoringConfig = &scoring
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("profile.GetCurrent scoring_config: %w", err)
+	}
+
 	return agg, nil
 }
 
@@ -116,6 +123,15 @@ func (r *ProfileRepo) CreateVersion(ctx context.Context, agg *domain.ProfileAggr
 			k.ProfileID = cp.ID
 			if err := tx.Create(&k).Error; err != nil {
 				return fmt.Errorf("profile.CreateVersion insert keyword_set: %w", err)
+			}
+		}
+
+		if agg.ScoringConfig != nil {
+			sc := *agg.ScoringConfig
+			sc.ID = ""
+			sc.ProfileID = cp.ID
+			if err := tx.Create(&sc).Error; err != nil {
+				return fmt.Errorf("profile.CreateVersion insert scoring_config: %w", err)
 			}
 		}
 
