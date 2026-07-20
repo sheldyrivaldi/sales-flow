@@ -1,8 +1,9 @@
 import { Link } from 'react-router'
-import { Users, Wallet, Sparkles, Trophy } from 'lucide-react'
+import { Users, Wallet, Sparkles, Trophy, BarChart3 } from 'lucide-react'
 
 import OtakAgentBanner from '../components/OtakAgentBanner'
 import StatCard from '../components/ui/StatCard'
+import Button from '../components/ui/Button'
 import Card, { CardHeader, CardBody } from '../components/ui/Card'
 import ScoreRing from '../components/ui/ScoreRing'
 import { ActionBadge } from '../components/ui/Badge'
@@ -22,7 +23,15 @@ export default function Dashboard() {
     <div className="flex flex-col gap-6">
       <OtakAgentBanner />
 
-      <h1 className="text-h2 font-semibold text-fg">Dashboard</h1>
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-h2 font-semibold text-fg">Dashboard</h1>
+        {/* Reports pindah ke sini dari sidebar — detail laporan lengkap. */}
+        <Link to="/reports">
+          <Button variant="secondary" size="sm" leftIcon={<BarChart3 className="w-4 h-4" />}>
+            Laporan
+          </Button>
+        </Link>
+      </div>
 
       {isLoading ? (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

@@ -22,7 +22,9 @@ HEADERS = {"Authorization": "Bearer test-key"}
 
 def _fake_agent(response: str):
     agent = MagicMock()
-    agent.chat.return_value = response
+    # /v1/responses now uses run_conversation (jalur yang sama dgn /v1/chat)
+    # yang mengembalikan dict {"final_response": ...}, bukan agent.chat().
+    agent.run_conversation.return_value = {"final_response": response}
     return agent
 
 
@@ -63,7 +65,6 @@ def test_responses_mode_uses_no_toolsets():
             headers=HEADERS,
         )
     assert captured.get("mode") == "responses"
-    assert captured.get("ephemeral_system_prompt")
 
 
 def test_responses_no_auth():
@@ -85,11 +86,11 @@ def test_responses_with_document_sends_multimodal_content():
     def fake_build(**kwargs):
         agent = MagicMock()
 
-        def fake_chat(content):
+        def fake_run(content, **_):
             captured["content"] = content
-            return '{"company_name": "PT Contoh"}'
+            return {"final_response": '{"company_name": "PT Contoh"}'}
 
-        agent.chat.side_effect = fake_chat
+        agent.run_conversation.side_effect = fake_run
         return agent
 
     with patch("app.routes.responses.build_agent", side_effect=fake_build), \
@@ -125,11 +126,11 @@ def test_responses_without_document_sends_plain_string():
     def fake_build(**kwargs):
         agent = MagicMock()
 
-        def fake_chat(content):
+        def fake_run(content, **_):
             captured["content"] = content
-            return '{"ok": true}'
+            return {"final_response": '{"ok": true}'}
 
-        agent.chat.side_effect = fake_chat
+        agent.run_conversation.side_effect = fake_run
         return agent
 
     with patch("app.routes.responses.build_agent", side_effect=fake_build):

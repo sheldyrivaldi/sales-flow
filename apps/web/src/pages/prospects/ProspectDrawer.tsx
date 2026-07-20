@@ -12,7 +12,6 @@ import EmptyState from '../../components/ui/EmptyState'
 import Skeleton, { SkeletonText } from '../../components/ui/Skeleton'
 import OutcomeNotesModal from '../../components/prospects/OutcomeNotesModal'
 import AiScorePanel from '../../components/AiScorePanel'
-import PlaybookPanel from '../../components/PlaybookPanel'
 import ScoreRing from '../../components/ui/ScoreRing'
 
 import { formatRupiahShort } from '../../lib/format'
@@ -168,7 +167,6 @@ export default function ProspectDrawer({ open, onClose, prospectId }: ProspectDr
           {/* Playbook */}
           <div>
             <h3 className="text-body font-semibold text-fg mb-2">Playbook</h3>
-            <PlaybookPanel targetType="prospect" targetId={prospect.id} />
           </div>
 
           {/* Timeline (placeholder) */}

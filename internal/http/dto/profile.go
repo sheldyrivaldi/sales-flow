@@ -66,6 +66,7 @@ type ProfileUpdateRequest struct {
 	Mission           *string                `json:"mission"`
 	SourceDocRefs     []string               `json:"source_doc_refs"`
 	PortfolioRefs     []string               `json:"portfolio_refs"`
+	SupportDocuments  []string               `json:"support_documents"`
 	CrawlFrequency    *string                `json:"crawl_frequency" validate:"omitempty,oneof=harian 2-3x mingguan"`
 	CrawlEnabled      *bool                  `json:"crawl_enabled"`
 	Target            *TargetCriteriaRequest `json:"target"   validate:"omitempty"`
@@ -145,6 +146,7 @@ type ProfileResponse struct {
 	Mission           *string                 `json:"mission"`
 	SourceDocRefs     []string                `json:"source_doc_refs"`
 	PortfolioRefs     []string                `json:"portfolio_refs"`
+	SupportDocuments  []string                `json:"support_documents"`
 	CrawlFrequency    string                  `json:"crawl_frequency"`
 	CrawlEnabled      bool                    `json:"crawl_enabled"`
 	Version           int                     `json:"version"`
@@ -170,6 +172,7 @@ func ToProfileResponse(agg domain.ProfileAggregate) ProfileResponse {
 		Mission:           agg.Profile.Mission,
 		SourceDocRefs:     orEmpty(agg.Profile.SourceDocRefs),
 		PortfolioRefs:     orEmpty(agg.Profile.PortfolioRefs),
+		SupportDocuments:  orEmpty(agg.Profile.SupportDocuments),
 		CrawlFrequency:    agg.Profile.CrawlFrequency,
 		CrawlEnabled:      agg.Profile.CrawlEnabled,
 		Version:           agg.Profile.Version,

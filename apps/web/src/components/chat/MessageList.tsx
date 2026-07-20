@@ -45,6 +45,9 @@ export default function MessageList({
           role={msg.role}
           content={msg.content}
           toolCalls={msg.tool_calls}
+          attachmentUrl={msg.attachment_url}
+          attachmentName={msg.attachment_name}
+          attachmentMime={msg.attachment_mime}
         />
       ))}
 

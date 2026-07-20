@@ -12,6 +12,7 @@ import ChipInput from '../../components/ui/ChipInput'
 import Badge from '../../components/ui/Badge'
 import { toast } from '../../lib/toast'
 import ProfilePdfIngest from '../../components/profile/ProfilePdfIngest'
+import { LogoBadge, LogoWordmark } from '../../components/Logo'
 
 import { useProfile, useSaveProfile } from '../../api/profile'
 import { useKeywordGeneration } from '../../lib/useKeywordGeneration'
@@ -142,7 +143,10 @@ export default function Onboarding() {
     <div className="min-h-screen bg-surface-subtle flex flex-col items-center px-4 py-10">
       <div className="w-full max-w-2xl flex flex-col gap-6">
         <div className="flex flex-col items-center gap-2 text-center">
-          <h1 className="text-h2 font-semibold text-fg">Selamat datang di SalesPilot</h1>
+          <LogoBadge size={40} className="mb-1" />
+          <h1 className="text-h2 font-semibold text-fg">
+            Selamat datang di <LogoWordmark />
+          </h1>
           <p className="text-body text-fg-muted">
             Atur "Otak Agent" secepat mungkin (&lt; 2 menit) agar AI bisa mulai mencari tender.
           </p>

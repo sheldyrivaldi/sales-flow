@@ -5,6 +5,7 @@ import { cn } from '../lib/cn'
 import { AiBadge } from '../components/ui/Badge'
 import Badge from '../components/ui/Badge'
 import Tooltip from '../components/ui/Tooltip'
+import { LogoBadge, LogoWordmark } from '../components/Logo'
 import { navItems } from './navItems'
 import type { NavItem } from './navItems'
 import { useAuthStore } from '../store/auth'
@@ -40,10 +41,19 @@ function ActiveBar() {
   )
 }
 
-export default function Sidebar({ collapsed }: SidebarProps) {
+export default function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const role = useAuthStore((s) => s.user?.role)
   const { pathname } = useLocation()
-  const visibleItems = navItems.filter((item) => !item.capability || can(role, item.capability))
+  // Filter item DAN sub-item berdasarkan capability; parent yang seluruh
+  // anaknya tersaring ikut hilang.
+  const visibleItems = navItems
+    .filter((item) => !item.capability || can(role, item.capability))
+    .map((item) =>
+      item.children
+        ? { ...item, children: item.children.filter((c) => !c.capability || can(role, c.capability)) }
+        : item
+    )
+    .filter((item) => !item.children || item.children.length > 0)
 
   // Explicit open/closed overrides from clicking a parent row, keyed by item
   // path. Absent = "follow the route" (expanded iff a child is active).
@@ -85,19 +95,14 @@ export default function Sidebar({ collapsed }: SidebarProps) {
           collapsed ? 'justify-center' : 'gap-2.5'
         )}
       >
-        <span
-          className="w-8 h-8 rounded-btn bg-gradient-to-br from-primary to-primary-hover flex items-center justify-center text-white font-bold text-body shrink-0 shadow-[0_2px_8px_rgba(5,150,105,0.35)]"
-          aria-hidden="true"
-        >
-          S
-        </span>
-        {!collapsed && (
-          <span className="font-semibold text-body text-fg truncate tracking-tight">SalesPilot</span>
-        )}
+        <LogoBadge size={32} />
+        {!collapsed && <LogoWordmark className="text-body" />}
       </div>
 
-      {/* Nav items */}
-      <nav className="flex-1 overflow-y-auto px-2 py-3">
+      {/* Nav items. overflow-x-hidden is required alongside overflow-y-auto:
+          otherwise the browser computes overflow-x to `auto` and a sub-pixel
+          overflow paints a phantom horizontal scrollbar in the collapsed rail. */}
+      <nav className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-3">
         {visibleItems.map((item) => {
           const Icon = item.icon
           const hasChildren = !!item.children && item.children.length > 0
@@ -119,24 +124,51 @@ export default function Sidebar({ collapsed }: SidebarProps) {
             </span>
           )
 
-          // Collapsed rail: no room for a nested tree — parent falls back to a
-          // plain link (to its own path) with a tooltip, same as any leaf.
+          // Collapsed rail (or any leaf item): no room for a nested tree.
           if (!hasChildren || collapsed) {
+            const groupActive = hasChildren
+              ? item.children!.some((c) => isPathActive(pathname, c.path, false))
+              : undefined
+
+            // A collapsed parent-with-children can't show its submenu inline,
+            // so clicking it expands the whole rail and opens that group —
+            // rather than silently jumping to a child page. Leaf items just
+            // navigate.
+            const row =
+              collapsed && hasChildren ? (
+                <button
+                  type="button"
+                  aria-label={item.label}
+                  aria-expanded={false}
+                  onClick={() => {
+                    setOverrides((prev) => ({ ...prev, [item.path]: true }))
+                    onToggle()
+                  }}
+                  className="block w-full py-0.5 focus-visible:outline-none"
+                >
+                  {linkContent(groupActive ?? false)}
+                </button>
+              ) : (
+                <NavLink to={item.path} end={item.path === '/'} className="block py-0.5">
+                  {({ isActive }) => linkContent(isActive)}
+                </NavLink>
+              )
+
             return (
               <div key={item.path}>
                 {item.dividerBefore && (
                   <div className="border-t border-line mx-2 my-2.5" role="separator" />
                 )}
                 {collapsed ? (
-                  <Tooltip content={item.label} side="right">
-                    <NavLink to={item.path} end={item.path === '/'} className="block py-0.5">
-                      {({ isActive }) => linkContent(isActive)}
-                    </NavLink>
+                  // w-full + justify-center: the Tooltip wrapper is inline-flex
+                  // and would otherwise shrink to content and left-align the
+                  // icon in the rail. Full width + centering keeps every
+                  // collapsed icon symmetric on the vertical axis.
+                  <Tooltip content={item.label} side="right" className="w-full justify-center">
+                    {row}
                   </Tooltip>
                 ) : (
-                  <NavLink to={item.path} end={item.path === '/'} className="block py-0.5">
-                    {({ isActive }) => linkContent(isActive)}
-                  </NavLink>
+                  row
                 )}
               </div>
             )
@@ -144,7 +176,9 @@ export default function Sidebar({ collapsed }: SidebarProps) {
 
           // Expandable parent with nested sub-items.
           const expanded = isExpanded(item)
-          const parentActive = isPathActive(pathname, item.path, false)
+          const parentActive =
+            isPathActive(pathname, item.path, false) ||
+            (item.children?.some((c) => isPathActive(pathname, c.path, false)) ?? false)
 
           return (
             <div key={item.path}>

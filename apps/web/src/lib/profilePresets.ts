@@ -57,3 +57,20 @@ export const DECISION_MAKER_PRESETS = [
   'Finance',
   'Business Unit',
 ]
+
+/** Dokumen pendukung tender yang umum diminta panitia pengadaan di
+ * Indonesia — preset untuk kartu "Dokumen Pendukung Tender". */
+export const SUPPORT_DOCUMENT_PRESETS = [
+  'NIB',
+  'NPWP',
+  'Akta Pendirian',
+  'SIUP/OSS',
+  'ISO 9001',
+  'ISO 27001',
+  'Laporan Keuangan Audited',
+  'Surat Referensi Kerja',
+  'SKK/SBU',
+  'KTA KADIN',
+  'BPJS Ketenagakerjaan',
+  'SPT Tahunan',
+]

@@ -4,6 +4,7 @@ import { Sparkles } from 'lucide-react'
 import { cn } from '../../lib/cn'
 import StreamingText from '../ui/StreamingText'
 import ToolCallChip from './ToolCallChip'
+import AttachmentPreview from './AttachmentPreview'
 import type { ToolCall } from '../../api/chat'
 
 export interface MessageBubbleProps {
@@ -11,15 +12,31 @@ export interface MessageBubbleProps {
   content: string
   streaming?: boolean
   toolCalls?: ToolCall[]
+  attachmentUrl?: string
+  attachmentName?: string
+  attachmentMime?: string
 }
 
-export default function MessageBubble({ role, content, streaming = false, toolCalls }: MessageBubbleProps) {
+export default function MessageBubble({
+  role,
+  content,
+  streaming = false,
+  toolCalls,
+  attachmentUrl,
+  attachmentName,
+  attachmentMime,
+}: MessageBubbleProps) {
   if (role === 'user') {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[75%] rounded-card px-4 py-2.5 bg-primary text-white text-body">
-          {content}
-        </div>
+      <div className="flex flex-col items-end gap-1.5">
+        {content && (
+          <div className="max-w-[75%] rounded-card px-4 py-2.5 bg-primary text-white text-body whitespace-pre-wrap">
+            {content}
+          </div>
+        )}
+        {attachmentUrl && (
+          <AttachmentPreview url={attachmentUrl} name={attachmentName} mime={attachmentMime} align="end" />
+        )}
       </div>
     )
   }
@@ -38,6 +55,11 @@ export default function MessageBubble({ role, content, streaming = false, toolCa
                 <ToolCallChip key={tc.id} name={tc.name} arguments={tc.arguments} status="done" />
               ))}
             </div>
+          )}
+
+          {/* File yang dikembalikan AI sebagai lampiran terstruktur */}
+          {attachmentUrl && (
+            <AttachmentPreview url={attachmentUrl} name={attachmentName} mime={attachmentMime} align="start" />
           )}
 
           {/* Message content */}
@@ -70,6 +92,31 @@ export default function MessageBubble({ role, content, streaming = false, toolCa
                       h1: ({ children }) => <h1 className="text-h3 font-semibold mb-1">{children}</h1>,
                       h2: ({ children }) => <h2 className="text-body font-semibold mb-1">{children}</h2>,
                       h3: ({ children }) => <h3 className="text-body font-medium mb-1">{children}</h3>,
+                      // Gambar yang dikembalikan AI (markdown image / data URL):
+                      // tampil sebagai thumbnail yang bisa diklik untuk dibuka.
+                      img: ({ src, alt }) =>
+                        src ? (
+                          <a href={String(src)} target="_blank" rel="noopener noreferrer" className="block my-1">
+                            <img
+                              src={String(src)}
+                              alt={alt ?? ''}
+                              loading="lazy"
+                              className="max-h-72 max-w-full rounded-card border border-line"
+                            />
+                          </a>
+                        ) : null,
+                      // Link (termasuk ke file yang dihasilkan AI): selalu buka
+                      // di tab baru dengan rel aman.
+                      a: ({ href, children }) => (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary underline underline-offset-2 hover:text-primary-hover"
+                        >
+                          {children}
+                        </a>
+                      ),
                     }}
                   >
                     {content}

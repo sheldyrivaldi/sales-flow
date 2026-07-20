@@ -4,6 +4,7 @@ import os
 class Settings:
     api_server_key: str
     hermes_model: str
+    hermes_model_fallbacks: list[str]
     port: int
     enabled_toolsets: list[str]
     openai_api_key: str
@@ -15,6 +16,11 @@ class Settings:
             raise RuntimeError("API_SERVER_KEY env var wajib diisi")
         self.api_server_key = key
         self.hermes_model = os.getenv("HERMES_MODEL", "default")
+        # Model cadangan bila model utama mati/menolak diam-diam (backend
+        # Codex kadang menggantung tanpa error untuk model tertentu). Dicoba
+        # berurutan; kosongkan untuk menonaktifkan.
+        fb_raw = os.getenv("HERMES_MODEL_FALLBACKS", "")
+        self.hermes_model_fallbacks = [m.strip() for m in fb_raw.split(",") if m.strip()]
         self.port = int(os.getenv("PORT", "8642"))
         toolsets_raw = os.getenv("ENABLED_TOOLSETS", "web")
         self.enabled_toolsets = [t.strip() for t in toolsets_raw.split(",") if t.strip()]

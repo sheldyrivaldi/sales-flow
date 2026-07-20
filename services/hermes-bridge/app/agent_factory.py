@@ -13,15 +13,41 @@ except ModuleNotFoundError:  # pragma: no cover
     AIAgent = None  # type: ignore[assignment,misc]
 
 
+def primary_model() -> str:
+    """Model utama: config aktif (BR-9) → fallback env."""
+    active = _get_active_provider()
+    if active and active.get("model"):
+        return str(active["model"])
+    return get_settings().hermes_model
+
+
+def model_chain() -> list[str]:
+    """Urutan model yang dicoba: utama lalu cadangan (tanpa duplikat).
+
+    Backend Codex kadang MENOLAK DIAM-DIAM model tertentu — request
+    menggantung 90 detik lalu broken pipe, tanpa error yang bisa dibedakan.
+    Mengulang model yang sama tidak menolong, jadi percobaan berikutnya harus
+    memakai model lain.
+    """
+    chain = [primary_model()]
+    for m in get_settings().hermes_model_fallbacks:
+        if m not in chain:
+            chain.append(m)
+    return chain
+
+
 def build_agent(
     *,
     mode: str,
     ephemeral_system_prompt: str | None = None,
+    model_override: str | None = None,
 ) -> Any:
     """Bangun AIAgent baru per-request.
 
     mode="chat"      → memory ON, toolsets aktif (untuk percakapan user).
     mode="responses" → memory OFF, toolsets kosong (deterministik untuk GenerateJSON).
+
+    model_override memaksa model tertentu (dipakai saat mencoba cadangan).
 
     Setiap call menghasilkan instance BARU karena AIAgent tidak thread-safe.
     """
@@ -35,11 +61,7 @@ def build_agent(
         "quiet_mode": True,
     }
 
-    # Model: config aktif (BR-9) → fallback env.
-    if active and active.get("model"):
-        kwargs["model"] = active["model"]
-    else:
-        kwargs["model"] = settings.hermes_model
+    kwargs["model"] = model_override or primary_model()
 
     # API key & base_url: config aktif → fallback env.
     if active and active.get("api_key"):

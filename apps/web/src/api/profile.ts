@@ -61,6 +61,7 @@ export interface Profile {
   mission: string | null
   source_doc_refs: string[]
   portfolio_refs: string[]
+  support_documents: string[]
   crawl_frequency: string
   crawl_enabled: boolean
   version: number
@@ -113,6 +114,7 @@ export interface ProfileUpdateBody {
   mission?: string
   source_doc_refs?: string[]
   portfolio_refs?: string[]
+  support_documents?: string[]
   crawl_frequency?: string
   crawl_enabled?: boolean
   target?: TargetCriteriaBody
@@ -147,6 +149,7 @@ export interface ProfileDraft {
   vision: string
   mission: string
   portfolio_refs: string[]
+  support_documents: string[]
   keywords: string[]
   negative_keywords: string[]
   nogo_custom: string[]

@@ -35,7 +35,7 @@ const thinBorder: Partial<ExcelJS.Borders> = {
 export async function exportPipelineExcel(
   prospects: Prospect[],
   ownerNames: Record<string, string>,
-  companyName = 'SalesPilot',
+  companyName = 'SalesFlow',
 ) {
   // Dynamic import: exceljs ~1 MB — dimuat hanya saat tombol export diklik,
   // bukan ikut bundle awal aplikasi.

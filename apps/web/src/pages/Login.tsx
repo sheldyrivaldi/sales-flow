@@ -6,6 +6,7 @@ import Input from '../components/ui/Input'
 import Field from '../components/ui/Field'
 import { login, ApiError } from '../lib/api'
 import { useAuthStore, useIsAuthenticated } from '../store/auth'
+import { LogoBadge, LogoWordmark } from '../components/Logo'
 
 export default function Login() {
   const navigate = useNavigate()
@@ -49,10 +50,8 @@ export default function Login() {
       <div className="w-full max-w-sm bg-surface rounded-card shadow-lg p-8 flex flex-col gap-6">
         {/* Logo + tagline */}
         <div className="flex flex-col items-center gap-2">
-          <div className="w-10 h-10 rounded-btn bg-primary flex items-center justify-center text-white font-bold text-h3">
-            S
-          </div>
-          <h1 className="text-h2 font-semibold text-fg">SalesPilot</h1>
+          <LogoBadge size={48} />
+          <LogoWordmark className="text-h2" />
           <p className="text-caption text-fg-muted text-center">
             Platform AI untuk tim sales B2B
           </p>

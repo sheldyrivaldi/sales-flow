@@ -194,11 +194,22 @@ export function currentAccessToken(): string | null {
 // undefined/null/empty-string values. Shared by all api/* modules so query
 // encoding lives in one place. Booleans (incl. false) are kept.
 export function buildQueryString(
-  params: Record<string, string | number | boolean | undefined | null>,
+  params: Record<string, string | number | boolean | undefined | null | readonly (string | number)[]>,
 ): string {
   const sp = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
     if (value === undefined || value === null || value === '') continue
+    // Array → parameter BERULANG (?type=A&type=B), bukan "A,B". Ini bentuk
+    // yang dibaca c.QueryParams()[key] di sisi Go dan dipakai filter
+    // multi-nilai; menggabungkannya dengan koma akan diperlakukan sebagai
+    // satu nilai tunggal yang tidak pernah cocok.
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        if (v === undefined || v === null || v === '') continue
+        sp.append(key, String(v))
+      }
+      continue
+    }
     sp.set(key, String(value))
   }
   const qs = sp.toString()

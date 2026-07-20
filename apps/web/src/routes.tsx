@@ -18,6 +18,11 @@ import UserManagement from './pages/users/UserManagement'
 import SettingsLayout from './pages/settings/SettingsLayout'
 import SettingsProfile from './pages/settings/SettingsProfile'
 import SettingsAiHermes from './pages/settings/SettingsAiHermes'
+import OngoingSummary from './pages/ongoing/OngoingSummary'
+import OngoingProjects from './pages/ongoing/OngoingProjects'
+import PostFeedback from './pages/postproject/PostFeedback'
+import PostAnalytics from './pages/postproject/PostAnalytics'
+import PublicFeedback from './pages/publicfeedback/PublicFeedback'
 
 export default function AppRoutes() {
   return (
@@ -28,6 +33,8 @@ export default function AppRoutes() {
       {/* Standalone (tanpa shell) */}
       <Route path="/login" element={<Login />} />
       <Route path="/onboarding" element={<Onboarding />} />
+      {/* Form feedback publik untuk client — tanpa login */}
+      <Route path="/f/:token" element={<PublicFeedback />} />
 
       {/* Halaman utama — dalam shell */}
       <Route element={<RequireAuth />}>
@@ -41,6 +48,16 @@ export default function AppRoutes() {
           <Route path="prospects" element={<ProspectBoard />} />
           <Route path="playbooks" element={<PlaybooksIndex />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="ongoing">
+            <Route index element={<Navigate to="summary" replace />} />
+            <Route path="summary" element={<OngoingSummary />} />
+            <Route path="projects" element={<OngoingProjects />} />
+          </Route>
+          <Route path="postproject">
+            <Route index element={<Navigate to="feedback" replace />} />
+            <Route path="feedback" element={<PostFeedback />} />
+            <Route path="analytics" element={<PostAnalytics />} />
+          </Route>
           <Route path="chat" element={<Chat />} />
           <Route path="users" element={<UserManagement />} />
           <Route path="settings" element={<SettingsLayout />}>

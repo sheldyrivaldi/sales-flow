@@ -14,7 +14,7 @@ import (
 
 // TestContract_ChatTriggersListTenders verifies the full round-trip: a real
 // Hermes chat request phrased as "tender prioritas?" should decide to call
-// the SalesPilot MCP list_tenders tool. Requires the full stack running
+// the SalesFlow MCP list_tenders tool. Requires the full stack running
 // (API serving /mcp, hermes-bridge with ENABLED_TOOLSETS including mcp,
 // config.yaml registering mcp_servers.sales). Skipped cleanly when
 // HERMES_BASE_URL is unset, matching internal/hermes/contract_test.go.

@@ -23,6 +23,9 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   tool_calls?: ToolCall[]
+  attachment_url?: string
+  attachment_name?: string
+  attachment_mime?: string
   created_at: string
 }
 

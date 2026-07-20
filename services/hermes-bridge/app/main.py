@@ -5,7 +5,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from app.routes import admin, chat, health, responses
+from app.routes import admin, agent_task, chat, health, responses
 
 log = logging.getLogger("hermes-bridge")
 
@@ -30,6 +30,7 @@ app.include_router(chat.router)
 app.include_router(health.router)
 app.include_router(responses.router)
 app.include_router(admin.router)
+app.include_router(agent_task.router)
 
 
 if __name__ == "__main__":

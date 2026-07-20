@@ -7,6 +7,7 @@ export interface OtakAgentFormState {
   techStack: string[]
   products: string[]
   portfolioRefs: string[]
+  supportDocuments: string[]
   vision: string
   mission: string
   countries: string[]

@@ -37,15 +37,49 @@ func (r *EventRepo) GetByID(ctx context.Context, id string) (*domain.Event, erro
 func (r *EventRepo) List(ctx context.Context, f domain.EventFilter, page, pageSize int) ([]domain.Event, int64, error) {
 	q := r.db.WithContext(ctx).Model(&domain.Event{})
 
-	if f.Type != nil {
-		q = q.Where("type = ?", *f.Type)
+	// Beberapa nilai dalam satu kolom = OR (IN), antar kolom = AND.
+	if len(f.Types) > 0 {
+		q = q.Where("type IN ?", f.Types)
 	}
-	if f.Status != nil {
-		q = q.Where("status = ?", *f.Status)
+	if len(f.Statuses) > 0 {
+		q = q.Where("status IN ?", f.Statuses)
 	}
 	if f.Search != "" {
+		// Kurung WAJIB: tanpa itu, AND mengikat lebih kuat dari OR sehingga
+		// filter lain (mis. type) hanya berlaku pada cabang OR pertama dan
+		// baris yang tidak cocok ikut lolos.
 		like := "%" + f.Search + "%"
-		q = q.Where("name ILIKE ? OR organizer ILIKE ?", like, like)
+		q = q.Where(
+			"(name ILIKE ? OR organizer ILIKE ? OR location ILIKE ? OR notes ILIKE ?)",
+			like, like, like, like,
+		)
+	}
+	if f.Location != "" {
+		q = q.Where("location ILIKE ?", "%"+f.Location+"%")
+	}
+	if f.Organizer != "" {
+		q = q.Where("organizer ILIKE ?", "%"+f.Organizer+"%")
+	}
+	if f.DateFrom != nil {
+		q = q.Where("event_date >= ?", *f.DateFrom)
+	}
+	if f.DateTo != nil {
+		q = q.Where("event_date <= ?", *f.DateTo)
+	}
+	// jsonb_array_length butuh kolom non-null; default '[]' menjamin itu.
+	if f.HasAttachment != nil {
+		if *f.HasAttachment {
+			q = q.Where("jsonb_array_length(attachments) > 0")
+		} else {
+			q = q.Where("jsonb_array_length(attachments) = 0")
+		}
+	}
+	if f.HasParticipant != nil {
+		if *f.HasParticipant {
+			q = q.Where("jsonb_array_length(participant_emails) > 0")
+		} else {
+			q = q.Where("jsonb_array_length(participant_emails) = 0")
+		}
 	}
 
 	var total int64

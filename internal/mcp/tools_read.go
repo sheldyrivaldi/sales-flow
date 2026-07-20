@@ -161,14 +161,14 @@ func listEventsHandler(deps Deps) mcpserver.ToolHandlerFunc {
 			if !t.Valid() {
 				return mcpgo.NewToolResultError("type tidak valid"), nil
 			}
-			f.Type = &t
+			f.Types = append(f.Types, t)
 		}
 		if v := req.GetString("status", ""); v != "" {
 			st := domain.EventStatus(v)
 			if !st.Valid() {
 				return mcpgo.NewToolResultError("status tidak valid"), nil
 			}
-			f.Status = &st
+			f.Statuses = append(f.Statuses, st)
 		}
 		f.Search = req.GetString("search", "")
 

@@ -125,6 +125,13 @@ func (s *ChatService) GetConversationDetail(ctx context.Context, id, ownerID str
 
 // AppendUserMessage persists a user message. It also sets the title if blank.
 func (s *ChatService) AppendUserMessage(ctx context.Context, conv *domain.Conversation, content string) (*domain.Message, error) {
+	return s.AppendUserMessageWithAttachment(ctx, conv, content, nil, nil, nil)
+}
+
+// AppendUserMessageWithAttachment persists a user message plus optional
+// attachment metadata (URL/name/mime) so the uploaded file stays openable
+// from the conversation history.
+func (s *ChatService) AppendUserMessageWithAttachment(ctx context.Context, conv *domain.Conversation, content string, url, name, mime *string) (*domain.Message, error) {
 	if err := s.SetTitleIfEmpty(ctx, conv, content); err != nil {
 		// non-blocking: log-worthy but don't fail the request
 		_ = err
@@ -134,6 +141,9 @@ func (s *ChatService) AppendUserMessage(ctx context.Context, conv *domain.Conver
 		ConversationID: conv.ID,
 		Role:           domain.RoleUser,
 		Content:        content,
+		AttachmentURL:  url,
+		AttachmentName: name,
+		AttachmentMime: mime,
 	}
 	if err := s.repo.CreateMessage(ctx, m); err != nil {
 		return nil, fmt.Errorf("chat.AppendUserMessage: %w", err)

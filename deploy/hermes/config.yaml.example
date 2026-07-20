@@ -37,6 +37,8 @@ mcp_servers:
         - get_company_profile
         - update_prospect_stage
         - save_playbook_draft
+        - save_playbook_job
+        - fail_playbook_job
 
 # --- Memory ---
 # holographic = Hermes built-in persistent memory (accumulates across sessions)

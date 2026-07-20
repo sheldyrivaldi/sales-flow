@@ -27,6 +27,11 @@ type CompanyProfile struct {
 	// "Bukti/Portfolio", which the source RFI treats as the single most
 	// important input for judging tender relevance against real capability.
 	PortfolioRefs []string `json:"portfolio_refs"       gorm:"column:portfolio_refs;serializer:json;type:jsonb"`
+	// SupportDocuments adalah daftar dokumen pendukung tender yang SUDAH
+	// dimiliki perusahaan (NIB, NPWP, ISO 9001, laporan keuangan audited,
+	// dsb) — dipakai AI saat scoring & ceklis kelengkapan dokumen supaya
+	// penilaian kesiapan administrasi berdasar fakta, bukan tebakan.
+	SupportDocuments []string `json:"support_documents"    gorm:"column:support_documents;serializer:json;type:jsonb"`
 	// CrawlFrequency drives the discovery scheduler (EP-12 ST-12.5.1): one of
 	// "harian" (daily), "2-3x" (2-3x/week), "mingguan" (weekly). CrawlEnabled
 	// defaults to false so a freshly onboarded workspace never auto-crawls

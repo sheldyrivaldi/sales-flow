@@ -1,75 +1,130 @@
 import type { PlaybookContent } from '../api/playbooks'
-import { slugify } from './format'
+import { buildDeck, pptFileName, VW, VH } from './playbookDeck'
+import type { DeckSlide } from './playbookDeck'
 
-const EMERALD = '059669'
-const SLATE_900 = '0F172A'
-const SLATE_600 = '475569'
+/** Ukuran slide PowerPoint 16:9 (inci). */
+const W_IN = 13.333
+const H_IN = 7.5
 
-/** Ekspor playbook menjadi file PowerPoint (.pptx) — satu slide per bagian,
- * gaya konsisten (judul emerald, isi slate). Hanya ditawarkan untuk playbook
- * event & custom. pptxgenjs di-lazy-load saat tombol diklik. */
-export async function exportPlaybookPpt(content: PlaybookContent, title: string) {
+/** Skala raster — 2× supaya teks tetap tajam saat diproyeksikan. */
+const SCALE = 2
+
+/** Raster satu SVG menjadi data URI PNG lewat canvas. Blob URL bersifat
+ * same-origin sehingga canvas tidak ter-taint. */
+async function svgToPng(svg: string): Promise<string> {
+  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  try {
+    const img = new Image()
+    img.decoding = 'sync'
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject(new Error('SVG slide gagal dirender'))
+      img.src = url
+    })
+    const canvas = document.createElement('canvas')
+    canvas.width = VW * SCALE
+    canvas.height = VH * SCALE
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Canvas tidak tersedia')
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/png')
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+/** XML transisi PowerPoint per jenis animasi slide. */
+function transitionXml(kind: DeckSlide['transition']): string {
+  const inner =
+    kind === 'fade'
+      ? '<p:fade/>'
+      : kind === 'push'
+        ? '<p:push dir="u"/>'
+        : kind === 'wipe'
+          ? '<p:wipe dir="r"/>'
+          : kind === 'split'
+            ? '<p:split orient="horz" dir="out"/>'
+            : '<p:zoom dir="in"/>'
+  return `<p:transition spd="med">${inner}</p:transition>`
+}
+
+/**
+ * Sisipkan elemen <p:transition> ke tiap slide XML di dalam paket .pptx.
+ * pptxgenjs tidak punya API transisi, jadi paket di-repack: elemen ditaruh
+ * tepat sebelum </p:sld> — posisi itu sudah sesuai urutan skema OOXML
+ * (setelah <p:clrMapOvr>, sebelum <p:timing>).
+ */
+async function injectTransitions(pptxBlob: Blob, deck: DeckSlide[]): Promise<Blob> {
+  const { default: JSZip } = await import('jszip')
+  const zip = await JSZip.loadAsync(pptxBlob)
+
+  await Promise.all(
+    deck.map(async (slide, i) => {
+      const path = `ppt/slides/slide${i + 1}.xml`
+      const file = zip.file(path)
+      if (!file) return
+      const xml = await file.async('string')
+      if (xml.includes('<p:transition')) return
+      zip.file(path, xml.replace('</p:sld>', `${transitionXml(slide.transition)}</p:sld>`))
+    }),
+  )
+
+  return zip.generateAsync({
+    type: 'blob',
+    mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    compression: 'DEFLATE',
+  })
+}
+
+function triggerDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = fileName
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  // Beri browser waktu memulai unduhan sebelum URL dilepas.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
+/**
+ * Rakit paket .pptx di memori. Dipisah dari aksi unduh supaya bisa diuji.
+ * Tiap slide dirancang AI (layout dipilih per topik), digambar sebagai SVG
+ * oleh playbookDeck, lalu diraster penuh ke PNG 2× dan dipasang full-bleed —
+ * sehingga file .pptx persis sama dengan preview di aplikasi.
+ */
+export async function buildPptxBlob(
+  content: PlaybookContent,
+  fallbackTitle: string,
+): Promise<{ blob: Blob; deck: DeckSlide[]; fileName: string }> {
+  const deck = buildDeck(content, fallbackTitle)
+  const title = (content.title || fallbackTitle || 'Playbook Strategis').trim()
+
   const { default: PptxGen } = await import('pptxgenjs')
   const pptx = new PptxGen()
-  pptx.defineLayout({ name: 'WIDE', width: 13.33, height: 7.5 })
-  pptx.layout = 'WIDE'
+  pptx.defineLayout({ name: 'DECK169', width: W_IN, height: H_IN })
+  pptx.layout = 'DECK169'
+  pptx.title = title
+  pptx.company = 'SalesFlow'
 
-  function addTitleSlide() {
-    const s = pptx.addSlide()
-    s.background = { color: 'FFFFFF' }
-    s.addShape('rect', { x: 0, y: 0, w: 13.33, h: 0.35, fill: { color: EMERALD } })
-    s.addText('PLAYBOOK', {
-      x: 0.8, y: 2.4, w: 11.7, h: 0.6,
-      fontSize: 20, color: EMERALD, bold: true, charSpacing: 4,
-    })
-    s.addText(title, {
-      x: 0.8, y: 3.0, w: 11.7, h: 1.6,
-      fontSize: 36, color: SLATE_900, bold: true,
-    })
-    s.addText(new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'long', year: 'numeric' }), {
-      x: 0.8, y: 4.7, w: 11.7, h: 0.5, fontSize: 14, color: SLATE_600,
-    })
-  }
+  // Raster paralel — jauh lebih cepat daripada berurutan untuk deck 10+ slide.
+  const images = await Promise.all(deck.map((s) => svgToPng(s.svg)))
 
-  function addSectionSlide(heading: string, body: string | string[], numbered = false) {
-    const s = pptx.addSlide()
-    s.background = { color: 'FFFFFF' }
-    s.addShape('rect', { x: 0, y: 0, w: 0.25, h: 7.5, fill: { color: EMERALD } })
-    s.addText(heading, {
-      x: 0.8, y: 0.5, w: 11.7, h: 0.8,
-      fontSize: 26, color: SLATE_900, bold: true,
-    })
-    if (typeof body === 'string') {
-      s.addText(body, { x: 0.8, y: 1.6, w: 11.7, h: 5.2, fontSize: 16, color: SLATE_600, valign: 'top' })
-    } else {
-      s.addText(
-        body.map((t, i) => ({
-          text: numbered ? `${i + 1}. ${t}` : t,
-          options: { bullet: !numbered, fontSize: 15, color: SLATE_600, breakLine: true, paraSpaceAfter: 8 },
-        })),
-        { x: 0.8, y: 1.6, w: 11.7, h: 5.4, valign: 'top' },
-      )
-    }
-  }
+  images.forEach((data, i) => {
+    const slide = pptx.addSlide()
+    slide.addImage({ data, x: 0, y: 0, w: W_IN, h: H_IN })
+    slide.addNotes(deck[i].title)
+  })
 
-  addTitleSlide()
-  addSectionSlide('Ringkasan', content.summary)
-  addSectionSlide('Value Proposition', content.value_prop)
-  addSectionSlide('Stakeholder Kunci', content.stakeholders)
-  addSectionSlide('Strategi', content.strategy_checklist)
-  if (content.timeline_plan && content.timeline_plan.length > 0) {
-    addSectionSlide(
-      'Rencana Kerja (Timeline)',
-      content.timeline_plan.map(
-        (t) => `${t.activity} — mulai hari ke-${t.start_day + 1}, durasi ${t.duration_days} hari`,
-      ),
-      true,
-    )
-  } else if (content.timeline.length > 0) {
-    addSectionSlide('Timeline', content.timeline, true)
-  }
-  addSectionSlide('Risiko', content.risks)
-  addSectionSlide('Next Actions', content.next_actions, true)
+  const raw = (await pptx.write({ outputType: 'blob' })) as Blob
+  const blob = await injectTransitions(raw, deck)
+  return { blob, deck, fileName: pptFileName(title) }
+}
 
-  await pptx.writeFile({ fileName: `playbook-${slugify(title)}.pptx` })
+/** Ekspor playbook menjadi file PowerPoint dan mulai unduhan. */
+export async function exportPlaybookPpt(content: PlaybookContent, fallbackTitle: string) {
+  const { blob, fileName } = await buildPptxBlob(content, fallbackTitle)
+  triggerDownload(blob, fileName)
 }

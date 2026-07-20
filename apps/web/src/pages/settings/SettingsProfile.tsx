@@ -8,6 +8,7 @@ import { SectionHeader, GroupLabel } from '../../components/ui/SectionHeader'
 import { SkeletonText } from '../../components/ui/Skeleton'
 import ProfileCard from '../../components/profile/ProfileCard'
 import CapabilitiesCard from '../../components/profile/CapabilitiesCard'
+import SupportDocsCard from '../../components/profile/SupportDocsCard'
 import VisionMissionCard from '../../components/profile/VisionMissionCard'
 import TargetCard from '../../components/profile/TargetCard'
 import NoGoCard from '../../components/profile/NoGoCard'
@@ -85,6 +86,7 @@ function profileToForm(p: Profile, editableSets: KeywordSet[]): OtakAgentFormSta
     techStack: p.tech_stack,
     products: p.products,
     portfolioRefs: p.portfolio_refs,
+    supportDocuments: p.support_documents ?? [],
     vision: p.vision ?? '',
     mission: p.mission ?? '',
     countries: p.target?.countries ?? [],
@@ -149,6 +151,7 @@ function formToBody(form: OtakAgentFormState, preservedKeywordSets: KeywordSet[]
     tech_stack: form.techStack,
     products: form.products,
     portfolio_refs: form.portfolioRefs,
+    support_documents: form.supportDocuments,
     vision: form.vision || undefined,
     mission: form.mission || undefined,
     source_doc_refs: form.sourceDocRefs,
@@ -317,7 +320,7 @@ export default function SettingsProfile() {
           icon={UserCircle}
           tone="slate"
           title="Profil User"
-          description="Akun kamu di SalesPilot — dikelola oleh Admin."
+          description="Akun kamu di SalesFlow — dikelola oleh Admin."
         />
         <UserSection />
       </section>
@@ -378,6 +381,7 @@ export default function SettingsProfile() {
                 <ProfileCard form={form} onChange={patchForm} disabled={disabled} error={companyNameError} />
                 <CapabilitiesCard form={form} onChange={patchForm} disabled={disabled} />
                 <VisionMissionCard form={form} onChange={patchForm} disabled={disabled} />
+                <SupportDocsCard form={form} onChange={patchForm} disabled={disabled} />
               </div>
             </div>
 

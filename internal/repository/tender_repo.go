@@ -11,7 +11,7 @@ import (
 )
 
 // businessTimeZone is the timezone "today" is anchored to for date-bucketed
-// queries (e.g. CountDiscoveryToday). Hardcoded to WIB since SalesPilot is a
+// queries (e.g. CountDiscoveryToday). Hardcoded to WIB since SalesFlow is a
 // single-workspace Indonesian product; evaluating dates in the DB session
 // timezone (often UTC in containers) would misbucket rows for up to 7 hours
 // around every local midnight.

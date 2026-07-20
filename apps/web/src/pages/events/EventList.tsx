@@ -1,14 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Plus, Calendar } from 'lucide-react'
+import { Plus, Calendar, Paperclip } from 'lucide-react'
 
 import Table from '../../components/ui/Table'
 import type { Column } from '../../components/ui/Table'
 import Button from '../../components/ui/Button'
 import EmptyState from '../../components/ui/EmptyState'
 import ConfirmDialog from '../../components/ui/ConfirmDialog'
-import Select from '../../components/ui/Select'
-import Input from '../../components/ui/Input'
 import { toast } from '../../lib/toast'
 import { formatTanggal } from '../../lib/format'
 import { cn } from '../../lib/cn'
@@ -16,12 +14,13 @@ import { cn } from '../../lib/cn'
 import {
   useEvents,
   useDeleteEvent,
-  useConvertEvent,
   EVENT_TYPE_LABELS,
   EVENT_STATUS_LABELS,
 } from '../../api/events'
 import type { Event, EventFilters, EventType, EventStatus } from '../../api/events'
-import EventFormDrawer from './EventFormDrawer'
+import EventFormModal from './EventFormModal'
+import EventFilterBar from '../../components/events/EventFilterBar'
+import EventAttachmentsModal from '../../components/events/EventAttachmentsModal'
 
 const TYPE_COLORS: Record<EventType, string> = {
   EXPO: 'bg-sky-100 text-sky-700',
@@ -42,14 +41,13 @@ export default function EventList() {
   const navigate = useNavigate()
   const [filters, setFilters] = useState<EventFilters>({ page: 1, page_size: 20 })
   const [page, setPage] = useState(1)
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | undefined>()
   const [deleteTarget, setDeleteTarget] = useState<Event | null>(null)
-  const [convertTarget, setConvertTarget] = useState<Event | null>(null)
+  const [attachmentTarget, setAttachmentTarget] = useState<Event | null>(null)
 
   const { data, isLoading } = useEvents({ ...filters, page })
   const deleteMutation = useDeleteEvent()
-  const convertMutation = useConvertEvent()
 
   const columns: Column<Event>[] = [
     {
@@ -95,6 +93,25 @@ export default function EventList() {
       render: (row) => <span className="text-fg-muted">{row.organizer ?? '—'}</span>,
     },
     {
+      key: 'attachments',
+      header: 'Lampiran',
+      render: (row) => {
+        const n = row.attachments?.length ?? 0
+        if (n === 0) return <span className="text-fg-subtle">—</span>
+        return (
+          <button
+            type="button"
+            onClick={() => setAttachmentTarget(row)}
+            className="inline-flex items-center gap-1.5 rounded-pill border border-line bg-surface-subtle px-2 py-0.5 text-caption text-fg hover:border-primary hover:text-primary transition-colors"
+            title={`Lihat ${n} lampiran`}
+          >
+            <Paperclip className="w-3.5 h-3.5" aria-hidden="true" />
+            {n}
+          </button>
+        )
+      },
+    },
+    {
       key: 'status',
       header: 'Status',
       render: (row) => (
@@ -107,12 +124,12 @@ export default function EventList() {
 
   function openCreate() {
     setEditingEvent(undefined)
-    setDrawerOpen(true)
+    setModalOpen(true)
   }
 
   function openEdit(ev: Event) {
     setEditingEvent(ev)
-    setDrawerOpen(true)
+    setModalOpen(true)
   }
 
   async function handleDelete() {
@@ -127,74 +144,26 @@ export default function EventList() {
     }
   }
 
-  async function handleConvert() {
-    if (!convertTarget) return
-    try {
-      await convertMutation.mutateAsync(convertTarget.id)
-      toast.success('Event berhasil dikonversi ke prospek.')
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : ''
-      toast.error(msg.includes('sudah dikonversi') ? 'Event ini sudah pernah dikonversi ke prospek.' : 'Gagal mengonversi event.')
-    } finally {
-      setConvertTarget(null)
-    }
-  }
-
   return (
     <div className="flex flex-col gap-6 p-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-h2 font-semibold text-fg">Events</h1>
         <Button leftIcon={<Plus className="w-4 h-4" />} onClick={openCreate}>
-          + Event Baru
+          Event Baru
         </Button>
       </div>
 
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-3">
-        <Select
-          className="w-44"
-          value={filters.type ?? ''}
-          onChange={(e) => {
-            const v = e.target.value as EventType | ''
-            setFilters((f) => ({ ...f, type: v || undefined }))
-            setPage(1)
-          }}
-        >
-          <option value="">Semua Tipe</option>
-          <option value="EXPO">Expo</option>
-          <option value="CONFERENCE">Conference</option>
-          <option value="SEMINAR">Seminar</option>
-          <option value="WORKSHOP">Workshop</option>
-          <option value="NETWORKING">Networking</option>
-          <option value="OTHER">Lainnya</option>
-        </Select>
-
-        <Select
-          className="w-44"
-          value={filters.status ?? ''}
-          onChange={(e) => {
-            const v = e.target.value as EventStatus | ''
-            setFilters((f) => ({ ...f, status: v || undefined }))
-            setPage(1)
-          }}
-        >
-          <option value="">Semua Status</option>
-          <option value="PLANNED">Direncanakan</option>
-          <option value="ATTENDED">Dihadiri</option>
-          <option value="CANCELLED">Dibatalkan</option>
-        </Select>
-
-        <Input
-          className="w-52"
-          placeholder="Cari nama/organizer…"
-          value={filters.search ?? ''}
-          onChange={(e) => {
-            setFilters((f) => ({ ...f, search: e.target.value || undefined }))
-            setPage(1)
-          }}
-        />
-      </div>
+      {/* Filter multi-kolom bergaya Jira: pencarian lintas kolom, multi pilih
+          per kolom, chip filter aktif, dan bersihkan semua. */}
+      <EventFilterBar
+        filters={filters}
+        onChange={(next) => {
+          setFilters(next)
+          setPage(1)
+        }}
+        resultCount={data?.total}
+      />
 
       {/* Table */}
       <div className="bg-surface border border-line rounded-card overflow-hidden">
@@ -214,7 +183,7 @@ export default function EventList() {
               description="Tambahkan event pameran, konferensi, atau networking yang dihadiri tim."
               action={
                 <Button size="sm" onClick={openCreate}>
-                  + Event Baru
+                  Event Baru
                 </Button>
               }
             />
@@ -229,8 +198,8 @@ export default function EventList() {
               onClick: () => openEdit(row),
             },
             {
-              label: '+ Konversi ke Prospek',
-              onClick: () => setConvertTarget(row),
+              label: 'Lihat Lampiran',
+              onClick: () => setAttachmentTarget(row),
             },
             {
               label: 'Hapus',
@@ -242,11 +211,11 @@ export default function EventList() {
       </div>
 
       {/* Form Drawer */}
-      <EventFormDrawer
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
+      <EventFormModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
         event={editingEvent}
-        onSaved={() => setDrawerOpen(false)}
+        onSaved={() => setModalOpen(false)}
       />
 
       {/* Delete confirm */}
@@ -261,16 +230,12 @@ export default function EventList() {
         onCancel={() => setDeleteTarget(null)}
       />
 
-      {/* Convert confirm */}
-      <ConfirmDialog
-        open={!!convertTarget}
-        title="Konversi ke Prospek?"
-        description={`Event "${convertTarget?.name}" akan dikonversi menjadi prospek baru.`}
-        confirmLabel="Konversi"
-        tone="primary"
-        loading={convertMutation.isPending}
-        onConfirm={handleConvert}
-        onCancel={() => setConvertTarget(null)}
+      {/* Daftar lampiran: buka di tab baru atau unduh */}
+      <EventAttachmentsModal
+        open={!!attachmentTarget}
+        onClose={() => setAttachmentTarget(null)}
+        eventName={attachmentTarget?.name ?? ''}
+        attachments={attachmentTarget?.attachments ?? []}
       />
     </div>
   )

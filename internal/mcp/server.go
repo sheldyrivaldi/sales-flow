@@ -1,4 +1,4 @@
-// Package mcp exposes SalesPilot's data as MCP (Model Context Protocol)
+// Package mcp exposes SalesFlow's data as MCP (Model Context Protocol)
 // tools over HTTP at /mcp, so Hermes can read sales data and (for a small
 // whitelisted set) propose actions. See task.plan.md Pola P-9.
 package mcp
@@ -32,6 +32,11 @@ type Deps struct {
 
 	Audit    domain.AuditRepository
 	Playbook domain.PlaybookDraftRepository
+
+	// PlaybookJob backs the callback-via-MCP flow: Hermes writes a finished
+	// (or failed) playbook back into a job row it was handed, so the app never
+	// holds a long connection waiting for generation (lihat save_playbook_job).
+	PlaybookJob domain.PlaybookJobRepository
 }
 
 // NewServer builds the MCP server and registers all read/write tools.

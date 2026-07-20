@@ -1,190 +1,191 @@
-import { useRef, useState } from 'react'
-import { CalendarClock, FileSpreadsheet, Sparkles, Upload, X } from 'lucide-react'
+import {
+  Sparkles,
+  Loader2,
+  Building2,
+  Wrench,
+  HelpCircle,
+  RefreshCw,
+  Paperclip,
+  AlertCircle,
+  Lock,
+} from 'lucide-react'
+
 import Card, { CardHeader, CardBody } from '../ui/Card'
 import Button from '../ui/Button'
-import Badge from '../ui/Badge'
-import { SkeletonText } from '../ui/Skeleton'
-import { cn } from '../../lib/cn'
+import AnalysisMarkdown from './AnalysisMarkdown'
 import { toast } from '../../lib/toast'
+import { formatRelative } from '../../lib/format'
 import { useAnalyzeEvent } from '../../api/events'
-import type { EventCompanyInsight, EventQuadrant } from '../../api/events'
+import type { EventAnalysis, AnalysisStatus } from '../../api/events'
 
-const QUADRANTS: { key: EventQuadrant; title: string; hint: string; className: string }[] = [
-  { key: 'prioritas_utama', title: 'Prioritas Utama', hint: 'Potensi tinggi · minat tinggi', className: 'border-success-border bg-success-subtle' },
-  { key: 'perlu_digarap',   title: 'Perlu Digarap',   hint: 'Potensi tinggi · minat rendah', className: 'border-info-border bg-info-subtle' },
-  { key: 'quick_win',       title: 'Quick Win',       hint: 'Potensi rendah · minat tinggi', className: 'border-warning-border bg-warning-subtle' },
-  { key: 'dipantau',        title: 'Dipantau',        hint: 'Potensi rendah · minat rendah', className: 'border-line bg-surface-subtle' },
-]
-
-/** Konversi file Excel (.xlsx) menjadi teks CSV di browser — hasilnya
- * dikirim sebagai teks ke AI (exceljs sudah jadi dependency untuk export). */
-async function xlsxToCsv(file: File): Promise<string> {
-  const { default: Excel } = await import('exceljs')
-  const wb = new Excel.Workbook()
-  await wb.xlsx.load(await file.arrayBuffer())
-  const lines: string[] = []
-  const ws = wb.worksheets[0]
-  ws?.eachRow((row) => {
-    const cells: string[] = []
-    row.eachCell({ includeEmpty: true }, (cell) => {
-      cells.push(String(cell.value ?? '').replace(/[\r\n,]+/g, ' ').trim())
-    })
-    lines.push(cells.join(','))
-  })
-  return lines.join('\n')
-}
-
-function CompanyChip({ company }: { company: EventCompanyInsight }) {
+function Sub({ icon: Icon, title, hint }: { icon: typeof Wrench; title: string; hint?: string }) {
   return (
-    <div className="rounded-btn bg-surface border border-line px-2.5 py-1.5 shadow-subtle">
-      <p className="text-caption font-semibold text-fg truncate">{company.name}</p>
-      {company.industry && <p className="text-caption text-fg-muted truncate">{company.industry}</p>}
-      {company.note && <p className="text-caption text-fg-subtle mt-0.5 line-clamp-2">{company.note}</p>}
+    <div className="flex items-baseline gap-2 flex-wrap">
+      <span className="inline-flex items-center gap-1.5 text-body font-semibold text-fg">
+        <Icon className="w-4 h-4 text-primary" aria-hidden="true" />
+        {title}
+      </span>
+      {hint && <span className="text-caption text-fg-subtle">{hint}</span>}
     </div>
   )
 }
 
-/** Analisa peserta event pasca-acara: unggah daftar peserta (PDF/Excel), AI
- * mengekstrak perusahaan + riset web, memetakan ke kuadran 2x2 (potensi ×
- * minat), lalu memberi ringkasan dan timeline follow-up sales otomatis. */
-export default function EventAnalysisPanel({ eventId }: { eventId: string }) {
+export interface EventAnalysisPanelProps {
+  eventId: string
+  analysis?: EventAnalysis
+  analyzedAt?: string
+  status: AnalysisStatus
+  error?: string
+  attachmentCount: number
+}
+
+/**
+ * Analisa AI event — inti nilai menu ini.
+ *
+ * Berjalan ASINKRON seperti generate playbook: menekan tombol hanya menitipkan
+ * tugas, lalu Hermes melapor balik saat selesai. Selama status "running"
+ * seluruh event dikunci (lihat EventDetail) supaya hasil tidak dihitung dari
+ * data yang berubah di tengah jalan.
+ *
+ * Tidak ada tombol unggah di sini: bahan diambil dari SELURUH event, termasuk
+ * semua lampirannya. Berkas ditambahkan lewat kartu Lampiran, satu tempat saja.
+ */
+export default function EventAnalysisPanel({
+  eventId,
+  analysis,
+  analyzedAt,
+  status,
+  error,
+  attachmentCount,
+}: EventAnalysisPanelProps) {
   const analyze = useAnalyzeEvent()
-  const [file, setFile] = useState<File | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const running = status === 'running'
+  const has = !!analysis
 
-  async function handleAnalyze() {
-    if (!file) return
-    // Toast sukses/gagal ditangani MutationCache global (main.tsx).
-    if (file.name.toLowerCase().endsWith('.xlsx')) {
-      const tableText = await xlsxToCsv(file)
-      analyze.mutate({ id: eventId, tableText })
-    } else {
-      analyze.mutate({ id: eventId, file })
+  async function run() {
+    try {
+      await analyze.mutateAsync(eventId)
+      toast.success('Analisa dimulai, hasilnya muncul otomatis di sini.')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Analisa AI gagal dimulai.')
     }
   }
-
-  function handlePick(f: File | undefined) {
-    if (!f) return
-    if (f.size > 10 * 1024 * 1024) {
-      toast.error('Ukuran dokumen maksimal 10 MB.')
-      return
-    }
-    setFile(f)
-  }
-
-  const result = analyze.data
-  const byQuadrant = (q: EventQuadrant) => result?.companies.filter((c) => c.quadrant === q) ?? []
 
   return (
     <Card>
-      <CardHeader className="flex items-center gap-2">
-        <Sparkles className="w-4 h-4 text-accent" aria-hidden="true" />
-        <h3 className="text-body font-semibold text-fg">Analisa Peserta (AI)</h3>
+      <CardHeader className="flex items-center gap-2 flex-wrap">
+        <Sparkles className="w-4 h-4 text-primary" aria-hidden="true" />
+        <h3 className="text-body font-semibold text-fg">Analisa AI</h3>
+        {analyzedAt && !running && (
+          <span className="text-caption text-fg-subtle">diperbarui {formatRelative(analyzedAt)}</span>
+        )}
+        <Button
+          size="sm"
+          className="ml-auto"
+          loading={analyze.isPending}
+          disabled={running || analyze.isPending}
+          leftIcon={has ? <RefreshCw className="w-3.5 h-3.5" /> : <Sparkles className="w-3.5 h-3.5" />}
+          onClick={() => void run()}
+        >
+          {running ? 'Sedang Berjalan…' : has ? 'Analisa Ulang' : 'Jalankan Analisa'}
+        </Button>
       </CardHeader>
-      <CardBody className="flex flex-col gap-4">
-        {/* Input */}
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.xlsx"
-            className="sr-only"
-            tabIndex={-1}
-            aria-hidden="true"
-            onChange={(e) => {
-              handlePick(e.target.files?.[0])
-              e.target.value = ''
-            }}
-          />
-          <Button
-            variant="secondary"
-            size="sm"
-            leftIcon={file?.name.toLowerCase().endsWith('.xlsx') ? <FileSpreadsheet className="w-3.5 h-3.5" /> : <Upload className="w-3.5 h-3.5" />}
-            disabled={analyze.isPending}
-            onClick={() => fileInputRef.current?.click()}
-          >
-            {file ? file.name : 'Pilih dokumen peserta (PDF/Excel)'}
-          </Button>
-          {file && (
-            <button
-              type="button"
-              aria-label="Hapus file"
-              onClick={() => setFile(null)}
-              className="text-fg-muted hover:text-danger transition-colors"
-            >
-              <X className="w-4 h-4" aria-hidden="true" />
-            </button>
-          )}
-          <Button size="sm" loading={analyze.isPending} disabled={!file} onClick={() => void handleAnalyze()}>
-            Analisa
-          </Button>
-        </div>
-        {!result && !analyze.isPending && (
-          <p className="text-caption text-fg-muted">
-            AI membaca daftar peserta, mencari info tiap perusahaan di internet, memetakan ke kuadran
-            potensi × minat, dan menyusun timeline follow-up otomatis.
-          </p>
-        )}
 
-        {analyze.isPending && (
-          <>
-            <p className="text-caption text-fg-muted">
-              AI membaca dokumen dan meriset perusahaan peserta — bisa memakan beberapa menit…
-            </p>
-            <SkeletonText lines={6} />
-          </>
-        )}
+      <CardBody className="flex flex-col gap-5">
+        <p className="inline-flex items-center gap-1.5 text-caption text-fg-muted">
+          <Paperclip className="w-3.5 h-3.5" aria-hidden="true" />
+          Membaca seluruh data event ini
+          {attachmentCount > 0
+            ? ` termasuk ${attachmentCount} lampiran.`
+            : '. Tambahkan berkas di kartu Lampiran agar analisa lebih dalam.'}
+        </p>
 
-        {result && (
-          <>
-            {/* Ringkasan */}
-            <p className="text-body text-fg">{result.summary}</p>
-
-            {/* Kuadran 2x2 */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {QUADRANTS.map((q) => {
-                const companies = byQuadrant(q.key)
-                return (
-                  <div key={q.key} className={cn('rounded-card border p-3 flex flex-col gap-2', q.className)}>
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <p className="text-body font-semibold text-fg">{q.title}</p>
-                        <p className="text-caption text-fg-muted">{q.hint}</p>
-                      </div>
-                      <Badge tone={q.key === 'prioritas_utama' ? 'success' : q.key === 'dipantau' ? 'info' : 'warning'}>
-                        {companies.length}
-                      </Badge>
-                    </div>
-                    <div className="flex flex-col gap-1.5">
-                      {companies.length === 0 ? (
-                        <p className="text-caption text-fg-subtle">Tidak ada.</p>
-                      ) : (
-                        companies.map((c, i) => <CompanyChip key={i} company={c} />)
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
+        {running && (
+          <div className="rounded-card border border-primary-border bg-primary-subtle p-4 flex items-start gap-3">
+            <Loader2 className="w-5 h-5 text-primary animate-spin shrink-0 mt-0.5" aria-hidden="true" />
+            <div>
+              <p className="text-body font-semibold text-fg">Analisa sedang berjalan</p>
+              <p className="text-caption text-fg-muted mt-0.5">
+                AI sedang membaca lampiran dan meriset di internet. Ini bisa belasan menit — kamu boleh
+                meninggalkan halaman ini, hasilnya tersimpan otomatis saat selesai.
+              </p>
+              <p className="inline-flex items-center gap-1.5 text-caption text-fg-subtle mt-2">
+                <Lock className="w-3.5 h-3.5" aria-hidden="true" />
+                Event dikunci selama proses ini agar hasilnya konsisten dengan datanya.
+              </p>
             </div>
+          </div>
+        )}
 
-            {/* Timeline follow-up */}
-            {result.timeline_suggestions.length > 0 && (
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-1.5">
-                  <CalendarClock className="w-4 h-4 text-primary" aria-hidden="true" />
-                  <h4 className="text-body font-semibold text-fg">Timeline Follow-up</h4>
+        {status === 'failed' && error && (
+          <div className="rounded-card border border-danger-border bg-danger-subtle p-3 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-danger mt-0.5 shrink-0" aria-hidden="true" />
+            <div>
+              <p className="text-body text-fg">{error}</p>
+              <p className="text-caption text-fg-muted mt-0.5">Klik Analisa Ulang untuk mencoba lagi.</p>
+            </div>
+          </div>
+        )}
+
+        {!has && !running && status !== 'failed' && (
+          <div className="rounded-card border border-dashed border-line bg-surface-subtle p-4 text-center">
+            <p className="text-body text-fg">Belum ada analisa untuk event ini.</p>
+            <p className="text-caption text-fg-muted mt-1 max-w-2xl mx-auto">
+              AI membaca identitas event, catatan tim, daftar undangan, dan isi seluruh lampiran, lalu
+              meriset di internet — menghasilkan ringkasan, apa yang bisa diolah di internal perusahaan,
+              dan peluang klien baru.
+            </p>
+          </div>
+        )}
+
+        {has && analysis && (
+          <>
+            {analysis.summary && (
+              <div className="rounded-card border border-primary/25 bg-primary-subtle p-3.5">
+                <AnalysisMarkdown>{analysis.summary}</AnalysisMarkdown>
+              </div>
+            )}
+
+            {analysis.sections?.map((sec, i) => (
+              <div key={i} className="flex flex-col gap-2 animate-row-in">
+                <Sub icon={Sparkles} title={sec.title} />
+                <div className="rounded-card border border-line bg-surface p-3.5">
+                  <AnalysisMarkdown>{sec.body}</AnalysisMarkdown>
                 </div>
-                <ol className="relative flex flex-col gap-2.5 pl-5 border-l-2 border-primary-border ml-1.5">
-                  {result.timeline_suggestions.map((t, i) => (
-                    <li key={i} className="relative text-body text-fg">
-                      <span
-                        className="absolute -left-[1.44rem] top-1.5 h-2.5 w-2.5 rounded-full bg-primary ring-4 ring-primary-subtle"
-                        aria-hidden="true"
-                      />
-                      {t}
+              </div>
+            ))}
+
+            {analysis.internal_opportunities && (
+              <div className="flex flex-col gap-2">
+                <Sub icon={Wrench} title="Untuk Internal Perusahaan" hint="yang bisa diolah sendiri" />
+                <div className="rounded-card border border-line bg-surface p-3.5">
+                  <AnalysisMarkdown>{analysis.internal_opportunities}</AnalysisMarkdown>
+                </div>
+              </div>
+            )}
+
+            {analysis.client_opportunities && (
+              <div className="flex flex-col gap-2">
+                <Sub icon={Building2} title="Peluang Klien Baru" hint="organisasi dan cara masuknya" />
+                <div className="rounded-card border border-primary/25 bg-primary-subtle p-3.5">
+                  <AnalysisMarkdown>{analysis.client_opportunities}</AnalysisMarkdown>
+                </div>
+              </div>
+            )}
+
+            {/* Kejujuran data sengaja DITAMPILKAN: analisa yang mengaku tidak
+                tahu jauh lebih berguna daripada yang menambal kekosongan. */}
+            {analysis.data_gaps?.length > 0 && (
+              <div className="rounded-card border border-line bg-surface-subtle p-3">
+                <Sub icon={HelpCircle} title="Yang Belum Bisa Disimpulkan" hint="perlu data tambahan" />
+                <ul className="flex flex-col gap-1 mt-1.5">
+                  {analysis.data_gaps.map((g, i) => (
+                    <li key={i} className="text-caption text-fg-muted flex gap-2">
+                      <span className="text-fg-subtle">–</span>
+                      <span>{g}</span>
                     </li>
                   ))}
-                </ol>
+                </ul>
               </div>
             )}
           </>

@@ -41,12 +41,15 @@ type ConversationListResponse struct {
 // --- Detail (with messages) ---
 
 type MessageResponse struct {
-	ID             string          `json:"id"`
-	ConversationID string          `json:"conversation_id"`
-	Role           string          `json:"role"`
-	Content        string          `json:"content"`
-	ToolCalls      interface{}     `json:"tool_calls,omitempty"`
-	CreatedAt      time.Time       `json:"created_at"`
+	ID             string      `json:"id"`
+	ConversationID string      `json:"conversation_id"`
+	Role           string      `json:"role"`
+	Content        string      `json:"content"`
+	ToolCalls      interface{} `json:"tool_calls,omitempty"`
+	AttachmentURL  *string     `json:"attachment_url,omitempty"`
+	AttachmentName *string     `json:"attachment_name,omitempty"`
+	AttachmentMime *string     `json:"attachment_mime,omitempty"`
+	CreatedAt      time.Time   `json:"created_at"`
 }
 
 func ToMessageResponse(m domain.Message) MessageResponse {
@@ -56,6 +59,9 @@ func ToMessageResponse(m domain.Message) MessageResponse {
 		Role:           string(m.Role),
 		Content:        m.Content,
 		ToolCalls:      m.ToolCalls,
+		AttachmentURL:  m.AttachmentURL,
+		AttachmentName: m.AttachmentName,
+		AttachmentMime: m.AttachmentMime,
 		CreatedAt:      m.CreatedAt,
 	}
 }

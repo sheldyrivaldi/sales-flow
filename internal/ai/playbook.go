@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"salespilot/internal/domain"
 	"salespilot/internal/hermes"
@@ -236,6 +237,106 @@ func (g *PlaybookGenerator) GenerateCustomTopic(ctx context.Context, topic strin
 	var content PlaybookContent
 	if _, err := g.hc.GenerateJSON(ctx, b.String(), &content, g.sk); err != nil {
 		return nil, fmt.Errorf("ai.PlaybookGenerator.GenerateCustomTopic: %w", err)
+	}
+	return &content, nil
+}
+
+// GenerateCustomFromDocument menyusun playbook custom dari TOPIK bebas plus
+// DOKUMEN pendukung yang diunggah user (dibaca via vision). Sama seperti
+// GenerateCustomTopic tapi mengutamakan isi dokumen sebagai konteks.
+func (g *PlaybookGenerator) GenerateCustomFromDocument(ctx context.Context, topic string, profile *domain.ProfileAggregate, pdfBytes []byte, filename string) (*PlaybookContent, error) {
+	de, ok := g.hc.(hermes.DocumentExtractor)
+	if !ok {
+		return nil, fmt.Errorf("ai.PlaybookGenerator.GenerateCustomFromDocument: hermes client tidak mendukung ekstraksi dokumen")
+	}
+
+	var b strings.Builder
+	b.WriteString("Kamu adalah asisten strategi sales B2B. Baca SELURUH dokumen terlampir dan susun PLAYBOOK terstruktur ")
+	b.WriteString("sesuai permintaan user di bawah. Prioritaskan informasi dari dokumen; lengkapi dari profil perusahaan. JANGAN mengarang.\n\n")
+
+	if profile != nil {
+		p := profile.Profile
+		fmt.Fprintf(&b, "## Profil Perusahaan\n- Nama: %s\n", p.CompanyName)
+		if len(p.ServiceCategories) > 0 {
+			fmt.Fprintf(&b, "- Layanan: %s\n", strings.Join(p.ServiceCategories, ", "))
+		}
+	}
+
+	fmt.Fprintf(&b, "\n## Permintaan User\n%s\n", topic)
+	b.WriteString("\nUntuk timeline_plan: susun rencana kerja bergaya Gantt — tiap aktivitas punya start_day (hari ke-N dari kickoff, mulai 0) dan duration_days; aktivitas boleh paralel.\n")
+	b.WriteString("Balas HANYA JSON dengan schema persis: ")
+	b.WriteString(playbookSchemaJSON)
+	b.WriteString(". Tanpa penjelasan, tanpa markdown, tanpa code fence.")
+
+	var content PlaybookContent
+	if _, err := de.GenerateJSONFromDocument(ctx, b.String(), filename, pdfBytes, &content, g.sk); err != nil {
+		return nil, fmt.Errorf("ai.PlaybookGenerator.GenerateCustomFromDocument: %w", err)
+	}
+	return &content, nil
+}
+
+// GenerateForEvent membuat playbook TERSTANDARISASI untuk sebuah event: (1)
+// riset web terbaru tentang event & penyelenggara, lalu (2) susun playbook
+// memakai seluruh konteks event + hasil riset + profil perusahaan. eventCtx
+// adalah blok teks berisi seluruh field event (nama, tipe, tanggal, lokasi,
+// organizer, catatan) yang dirakit pemanggil.
+func (g *PlaybookGenerator) GenerateForEvent(ctx context.Context, eventName, eventCtx string, profile *domain.ProfileAggregate) (*PlaybookContent, error) {
+	// Langkah 1 — riset web (best-effort; kegagalan/timeout TIDAK membatalkan
+	// generate). Diberi timeout sendiri yang lebih pendek supaya endpoint riset
+	// yang lambat/tidak stabil tidak menghabiskan seluruh anggaran waktu job.
+	research := ""
+	{
+		researchCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		var rb strings.Builder
+		rb.WriteString("Cari informasi TERBARU dari internet tentang event dan penyelenggara berikut, ")
+		rb.WriteString("lalu rangkum fakta yang relevan untuk strategi sales B2B: profil penyelenggara, ")
+		rb.WriteString("skala/peserta biasa, industri fokus, sponsor/exhibitor umum, dan peluang bisnis yang masuk akal.\n\n")
+		rb.WriteString(eventCtx)
+		rb.WriteString("\nJawab ringkas dalam poin-poin faktual. Jika tidak yakin, katakan tidak yakin — jangan mengarang.")
+		if resp, err := g.hc.Chat(researchCtx, hermes.ChatRequest{
+			Messages:   []hermes.Message{{Role: "user", Content: rb.String()}},
+			SessionKey: g.sk,
+		}); err == nil {
+			research = strings.TrimSpace(resp.Content)
+		}
+		cancel()
+	}
+
+	// Langkah 2 — susun playbook dari konteks + riset.
+	var b strings.Builder
+	b.WriteString("Kamu adalah asisten strategi sales B2B. Buat PLAYBOOK terstruktur, rapi, dan DETAIL untuk memaksimalkan ")
+	b.WriteString("peluang bisnis dari keikutsertaan pada event berikut. Gunakan SELURUH konteks event, hasil riset internet, ")
+	b.WriteString("dan profil perusahaan. Semua rekomendasi harus konkret dan bisa dieksekusi tim sales.\n\n")
+
+	if profile != nil {
+		p := profile.Profile
+		fmt.Fprintf(&b, "## Profil Perusahaan\n- Nama: %s\n", p.CompanyName)
+		if len(p.ServiceCategories) > 0 {
+			fmt.Fprintf(&b, "- Layanan: %s\n", strings.Join(p.ServiceCategories, ", "))
+		}
+		if len(p.Products) > 0 {
+			fmt.Fprintf(&b, "- Produk: %s\n", strings.Join(p.Products, ", "))
+		}
+	}
+
+	b.WriteString("\n## Konteks Event\n")
+	b.WriteString(eventCtx)
+	if research != "" {
+		b.WriteString("\n## Hasil Riset Internet (terbaru)\n")
+		b.WriteString(research)
+		b.WriteString("\n")
+	}
+
+	fmt.Fprintf(&b, "\nJudul/nama peluang di playbook: %q.\n", eventName)
+	b.WriteString("Untuk timeline_plan: susun rencana kerja bergaya Gantt sepanjang periode sebelum, saat, dan sesudah event — ")
+	b.WriteString("tiap aktivitas punya start_day (hari ke-N dari sekarang, mulai 0) dan duration_days; aktivitas boleh paralel.\n")
+	b.WriteString("Balas HANYA JSON dengan schema persis: ")
+	b.WriteString(playbookSchemaJSON)
+	b.WriteString(". Tanpa penjelasan, tanpa markdown, tanpa code fence.")
+
+	var content PlaybookContent
+	if _, err := g.hc.GenerateJSON(ctx, b.String(), &content, g.sk); err != nil {
+		return nil, fmt.Errorf("ai.PlaybookGenerator.GenerateForEvent: %w", err)
 	}
 	return &content, nil
 }

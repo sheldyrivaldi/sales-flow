@@ -49,6 +49,32 @@ class ResponsesRequest(BaseModel):
     document_filename: str | None = None
 
 
+class DocumentPayload(BaseModel):
+    """Satu lampiran untuk agent-task. Dipakai agar SATU tugas bisa membawa
+    BANYAK dokumen sekaligus — batas satu-dokumen sebelumnya murni buatan
+    schema ini, bukan batas agent-nya."""
+
+    base64: str
+    filename: str = "document.pdf"
+
+
+class AgentTaskRequest(BaseModel):
+    """Fire-and-forget agent task: bridge menyusun playbook di background lalu
+    MELAPOR BALIK ke app lewat callback_url (bukan mengandalkan LLM memanggil
+    tool). instruction memuat seluruh konteks + perintah "balas HANYA JSON".
+    Hasil (atau error) di-POST ke callback_url dengan header X-Cron-Secret."""
+
+    instruction: str
+    job_id: str
+    callback_url: str
+    # documents: daftar lampiran (utama). document_base64/document_filename
+    # dipertahankan demi kompatibilitas pemanggil lama.
+    documents: list[DocumentPayload] = Field(default_factory=list)
+    callback_secret: str = ""
+    document_base64: str | None = None
+    document_filename: str | None = None
+
+
 class ProviderConfigRequest(BaseModel):
     provider: str
     model: str

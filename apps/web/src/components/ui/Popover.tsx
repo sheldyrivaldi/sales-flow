@@ -16,8 +16,11 @@ export interface PopoverProps {
 export default function Popover({ trigger, children, align = 'end', className }: PopoverProps) {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLDivElement>(null)
-  const contentRef = useRef<HTMLDivElement>(null)
-  const pos = useFloatingPosition(triggerRef, open, align)
+  // Elemen panel disimpan sebagai STATE, bukan ref: perubahannya harus memicu
+  // penghitungan ulang posisi, karena lebar panel baru terukur setelah ia
+  // menempel di DOM — dan lebar itulah dasar penjepitan ke dalam viewport.
+  const [contentEl, setContentEl] = useState<HTMLDivElement | null>(null)
+  const pos = useFloatingPosition(triggerRef, open, align, contentEl)
 
   const close = useCallback(() => setOpen(false), [])
 
@@ -29,7 +32,7 @@ export default function Popover({ trigger, children, align = 'end', className }:
     function handleMouseDown(e: MouseEvent) {
       const target = e.target as Node
       if (triggerRef.current?.contains(target)) return
-      if (contentRef.current?.contains(target)) return
+      if (contentEl?.contains(target)) return
       close()
     }
     function handleKeyDown(e: KeyboardEvent) {
@@ -41,7 +44,7 @@ export default function Popover({ trigger, children, align = 'end', className }:
       document.removeEventListener('mousedown', handleMouseDown)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [open, close])
+  }, [open, close, contentEl])
 
   return (
     <div ref={triggerRef} className="relative inline-flex">
@@ -64,7 +67,7 @@ export default function Popover({ trigger, children, align = 'end', className }:
         pos &&
         createPortal(
           <div
-            ref={contentRef}
+            ref={setContentEl}
             role="dialog"
             style={{
               position: 'fixed',
@@ -73,7 +76,11 @@ export default function Popover({ trigger, children, align = 'end', className }:
               transform: pos.alignEnd ? 'translateX(-100%)' : undefined,
             }}
             className={cn(
+              // max-w mengunci panel agar tidak pernah melewati tepi layar:
+              // posisinya `fixed`, jadi tanpa batas ini isi yang lebar akan
+              // terpotong di viewport sempit.
               'z-[9000] bg-surface border border-line rounded-card shadow-lg min-w-48',
+              'max-w-[calc(100vw-1rem)] overflow-x-hidden',
               className
             )}
           >

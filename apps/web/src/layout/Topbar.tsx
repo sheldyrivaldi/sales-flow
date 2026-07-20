@@ -15,10 +15,18 @@ export interface TopbarProps {
 
 function usePageTitle(): string {
   const { pathname } = useLocation()
-  const match = navItems.find((item) =>
-    item.path === '/' ? pathname === '/' : pathname.startsWith(item.path)
-  )
-  return match?.label ?? 'SalesPilot'
+  for (const item of navItems) {
+    // Sub-item dicek lebih dulu supaya judul lebih spesifik (mis. "Daftar
+    // Proyek" alih-alih "Proyek Berjalan").
+    const child = item.children?.find(
+      (c) => pathname === c.path || pathname.startsWith(c.path + '/')
+    )
+    if (child) return child.label
+    if (item.path === '/' ? pathname === '/' : pathname.startsWith(item.path)) {
+      return item.label
+    }
+  }
+  return 'SalesFlow'
 }
 
 export default function Topbar({ onToggleSidebar }: TopbarProps) {

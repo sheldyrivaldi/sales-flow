@@ -41,8 +41,14 @@ type Message struct {
 	Role           MessageRole     `json:"role"            gorm:"not null"`
 	Content        string          `json:"content"         gorm:"not null;default:''"`
 	ToolCalls      json.RawMessage `json:"tool_calls,omitempty" gorm:"type:jsonb"`
-	CreatedAt      time.Time       `json:"created_at"`
-	UpdatedAt      time.Time       `json:"updated_at"`
+	// Attachment* menyimpan lampiran yang dikirim bersama pesan (file user
+	// yang diunggah, atau file yang dikembalikan AI) — URL menunjuk ke file
+	// tersimpan agar bisa dibuka/preview dari riwayat chat.
+	AttachmentURL  *string   `json:"attachment_url,omitempty"  gorm:"column:attachment_url"`
+	AttachmentName *string   `json:"attachment_name,omitempty" gorm:"column:attachment_name"`
+	AttachmentMime *string   `json:"attachment_mime,omitempty" gorm:"column:attachment_mime"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 func (Message) TableName() string { return "message" }

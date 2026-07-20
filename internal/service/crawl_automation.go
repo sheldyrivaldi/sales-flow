@@ -60,7 +60,7 @@ func cronScheduleForFrequency(freq string) string {
 // this callback, not reimplemented as something the LLM does per tick.
 func triggerPrompt(callbackURL string) string {
 	return fmt.Sprintf(
-		"Tugas cron otomatis SalesPilot. SATU langkah saja: lakukan HTTP GET ke URL berikut untuk memicu "+
+		"Tugas cron otomatis SalesFlow. SATU langkah saja: lakukan HTTP GET ke URL berikut untuk memicu "+
 			"pencarian tender terjadwal: %s — Jangan mencari tender secara manual, jangan menjelaskan apa pun, "+
 			"jangan melakukan langkah lain. Cukup panggil URL tersebut, lalu selesai.",
 		callbackURL,

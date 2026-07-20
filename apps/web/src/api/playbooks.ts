@@ -14,7 +14,96 @@ export interface PlaybookTimelineItem {
   duration_days: number
 }
 
+/** Kartu angka kunci — memberi bobot "daging" & kuantitatif ke slide. */
+export interface PlaybookMetric {
+  /** Angka besar, mis. "Rp 4,2 M", "68%", "3 thn". */
+  value: string
+  /** Label singkat di bawah angka. */
+  label: string
+  /** Keterangan konteks opsional. */
+  caption?: string
+}
+
+/** Pilar pembeda (why-us) dengan judul + penjelasan konkret. */
+export interface PlaybookDifferentiator {
+  title: string
+  detail: string
+}
+
+/** Satu stakeholder pada peta pengaruh. */
+export interface PlaybookStakeholder {
+  name: string
+  role?: string
+  /** 'tinggi' | 'sedang' | 'rendah' — menentukan penempatan/aksen. */
+  influence?: string
+  /** Angle/pendekatan menang untuk orang ini. */
+  angle?: string
+}
+
+/** Pasangan risiko → mitigasi untuk slide matriks risiko. */
+export interface PlaybookRisk {
+  risk: string
+  mitigation: string
+  /** 'tinggi' | 'sedang' | 'rendah' opsional. */
+  impact?: string
+}
+
+/** Layout yang bisa dipilih AI untuk tiap slide. Renderer punya desain visual
+ * berbeda untuk masing-masing — inilah yang membuat deck tidak seragam. */
+export type DeckLayout =
+  | 'cover'
+  | 'statement'
+  | 'metrics'
+  | 'pillars'
+  | 'bullets'
+  | 'steps'
+  | 'timeline'
+  | 'comparison'
+  | 'matrix'
+  | 'people'
+  | 'risks'
+  | 'process'
+  | 'quote'
+  | 'closing'
+
+/** Satu slide yang DIRANCANG AI: ia memilih layout + mengisi field relevan.
+ * Field yang tak dipakai layout tersebut diabaikan renderer. */
+export interface DeckSlideSpec {
+  layout: DeckLayout
+  /** SVG 1280x720 yang DIKARANG AI khusus untuk slide ini — desain bebas
+   * sesuai topik. Disanitasi + divalidasi sebelum dipakai; bila ditolak,
+   * renderer jatuh ke layout katalog memakai field di bawah. Karena itu
+   * field-field lain tetap WAJIB diisi sebagai cadangan. */
+  svg?: string
+  eyebrow?: string
+  heading?: string
+  /** Teks utama untuk cover/statement/quote. */
+  body?: string
+  /** Sumber kutipan (layout quote). */
+  attribution?: string
+  bullets?: string[]
+  metrics?: PlaybookMetric[]
+  /** Kartu untuk pillars / process. */
+  cards?: { title: string; detail: string; tag?: string }[]
+  people?: PlaybookStakeholder[]
+  risks?: PlaybookRisk[]
+  /** Dua kolom kontras (comparison), mis. "Tanpa kami" vs "Dengan kami". */
+  columns?: { title: string; items: string[] }[]
+  /** Empat kuadran (matrix). */
+  quadrants?: { title: string; items: string[] }[]
+  timeline_plan?: PlaybookTimelineItem[]
+  /** Strip insight di bawah slide — bagus untuk "so what". */
+  note?: string
+}
+
 export interface PlaybookContent {
+  /** Judul presentasi yang disusun AI (bukan prompt). */
+  title?: string
+  /** Sub-judul singkat untuk slide cover. */
+  subtitle?: string
+  /** Hint tema warna: emerald|teal|indigo|blue|violet|cyan|amber|rose|slate.
+   * Dipilih AI agar deck tiap topik terlihat berbeda; auto-derive bila kosong. */
+  accent?: string
   summary: string
   value_prop: string
   stakeholders: string[]
@@ -25,6 +114,15 @@ export interface PlaybookContent {
   /** Rencana kerja terstruktur untuk render Gantt — playbook lama mungkin
    * tidak memilikinya (fallback ke `timeline`). */
   timeline_plan?: PlaybookTimelineItem[]
+  // ── Field kaya (opsional) — renderer fallback ke field datar di atas ──
+  metrics?: PlaybookMetric[]
+  differentiators?: PlaybookDifferentiator[]
+  stakeholder_map?: PlaybookStakeholder[]
+  risk_matrix?: PlaybookRisk[]
+  /** Deck yang dirancang AI sendiri (urutan + layout tiap slide disesuaikan
+   * topik). Bila ada, ini yang dirender; bila kosong, renderer menyusun deck
+   * dari field datar di atas (playbook lama tetap tampil). */
+  deck?: DeckSlideSpec[]
 }
 
 export interface Playbook {

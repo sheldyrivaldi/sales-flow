@@ -1,13 +1,10 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   LayoutDashboard,
-  Sparkles,
-  FileText,
-  Calendar,
-  Users,
+  Compass,
+  Briefcase,
+  ClipboardCheck,
   UserCog,
-  BookOpen,
-  BarChart3,
   MessageSquare,
   Settings,
 } from 'lucide-react'
@@ -16,6 +13,7 @@ import type { Capability } from '../lib/rbac'
 export interface NavSubItem {
   path: string
   label: string
+  capability?: Capability
 }
 
 export interface NavItem {
@@ -29,16 +27,37 @@ export interface NavItem {
   children?: NavSubItem[]
 }
 
+/** Struktur nav mengikuti siklus hidup penjualan proyek:
+ *  Pra-Proyek (berburu peluang) → Proyek Berjalan (delivery yang dipantau
+ *  sales) → Pasca-Proyek (feedback & analisa client). */
 export const navItems: NavItem[] = [
-  { path: '/',            label: 'Dashboard',   icon: LayoutDashboard },
-  { path: '/discovery',  label: 'Radar Tender', icon: Sparkles,      badge: 'count', capability: 'RunDiscovery' },
-  { path: '/tenders',    label: 'Tenders',      icon: FileText },
-  { path: '/events',     label: 'Events',       icon: Calendar },
-  { path: '/prospects',  label: 'Pipeline',     icon: Users },
-  { path: '/playbooks',  label: 'Playbooks',    icon: BookOpen },
-  { path: '/reports',    label: 'Reports',      icon: BarChart3 },
-  { path: '/chat',       label: 'Chat',         icon: MessageSquare, badge: 'ai' },
-  { path: '/users',      label: 'User Management', icon: UserCog,    dividerBefore: true, capability: 'ManageUsers' },
+  { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+  {
+    path: '/presales', label: 'Pra-Proyek', icon: Compass,
+    children: [
+      { path: '/discovery', label: 'Radar Tender', capability: 'RunDiscovery' },
+      { path: '/tenders',   label: 'Tenders' },
+      { path: '/events',    label: 'Events' },
+      { path: '/prospects', label: 'Pipeline' },
+      { path: '/playbooks', label: 'Playbooks' },
+    ],
+  },
+  {
+    path: '/ongoing', label: 'Proyek Berjalan', icon: Briefcase,
+    children: [
+      { path: '/ongoing/summary',  label: 'Ringkasan' },
+      { path: '/ongoing/projects', label: 'Daftar Proyek' },
+    ],
+  },
+  {
+    path: '/postproject', label: 'Pasca-Proyek', icon: ClipboardCheck,
+    children: [
+      { path: '/postproject/feedback',  label: 'Feedback Client' },
+      { path: '/postproject/analytics', label: 'Analisa Feedback' },
+    ],
+  },
+  { path: '/chat', label: 'Chat', icon: MessageSquare, badge: 'ai' },
+  { path: '/users', label: 'User Management', icon: UserCog, dividerBefore: true, capability: 'ManageUsers' },
   {
     path: '/settings', label: 'Settings', icon: Settings,
     children: [

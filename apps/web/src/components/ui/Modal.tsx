@@ -5,12 +5,13 @@ import { cn } from '../../lib/cn'
 import { useOverlay } from '../../lib/useOverlay'
 import { useId } from 'react'
 
-type ModalSize = 'sm' | 'md' | 'lg'
+type ModalSize = 'sm' | 'md' | 'lg' | 'xl'
 
 const sizeClasses: Record<ModalSize, string> = {
   sm: 'max-w-sm',
   md: 'max-w-lg',
   lg: 'max-w-2xl',
+  xl: 'max-w-3xl',
 }
 
 export interface ModalProps {

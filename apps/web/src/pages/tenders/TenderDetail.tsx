@@ -12,7 +12,6 @@ import Field from '../../components/ui/Field'
 import EmptyState from '../../components/ui/EmptyState'
 import Skeleton, { SkeletonText } from '../../components/ui/Skeleton'
 import AiScorePanel from '../../components/AiScorePanel'
-import PlaybookPanel from '../../components/PlaybookPanel'
 import DocChecklistCard from '../../components/tenders/DocChecklistCard'
 import ProposalDraftDrawer from '../../components/tenders/ProposalDraftDrawer'
 import TenderFormDrawer from './TenderFormDrawer'
@@ -304,7 +303,6 @@ export default function TenderDetail() {
         <TabPanel id="playbook">
           {activeTab === 'playbook' && (
             <div className="max-w-2xl">
-              <PlaybookPanel targetType="tender" targetId={tender.id} />
             </div>
           )}
         </TabPanel>

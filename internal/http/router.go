@@ -83,6 +83,11 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 
 	e.GET("/healthz", healthzHandler(db))
 
+	// Serve uploaded files (chat attachments, etc.) statically so images can
+	// render in <img> and PDFs open in a new tab. Filenames are UUIDs, so
+	// they're unguessable — acceptable for an internal workspace tool.
+	e.Static("/uploads", cfg.UploadDir)
+
 	// Wire dependencies.
 	userRepo := repository.NewUserRepo(db)
 	authSvc := service.NewAuthService(userRepo, cfg.JWTSecret)
@@ -137,7 +142,15 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	prospectRepo := repository.NewProspectRepo(db)
 	eventRepo := repository.NewEventRepo(db)
 	eventSvc := service.NewEventService(eventRepo, prospectRepo)
-	eventH := handlers.NewEventHandler(eventSvc)
+	eventH := handlers.NewEventHandler(eventSvc, cfg.UploadDir)
+
+	projectRepo := repository.NewProjectRepo(db)
+	projectSvc := service.NewProjectService(projectRepo)
+	projectH := handlers.NewProjectHandler(projectSvc)
+
+	feedbackRepo := repository.NewFeedbackRepo(db)
+	feedbackSvc := service.NewFeedbackService(feedbackRepo)
+	feedbackH := handlers.NewFeedbackHandler(feedbackSvc)
 
 	prospectSvc := service.NewProspectService(prospectRepo, outcomeRepo, learningHook)
 	prospectSvc.SetEmitter(emitter)
@@ -179,11 +192,51 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	scoreSvc.SetEmitter(emitter)
 	scoreH := handlers.NewScoreHandler(scoreSvc, auditRepo)
 
-	playbookRepo := repository.NewPlaybookRepo(db)
-	playbookGen := ai.NewPlaybookGenerator(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
-	playbookSvc := service.NewPlaybookService(playbookGen, playbookRepo, tenderSvc, prospectSvc, profileSvc)
-	playbookSvc.SetEvents(eventSvc)
-	playbookH := handlers.NewPlaybookHandler(playbookSvc, auditRepo)
+	// Playbook jobs (menu Playbooks + generate dari Event) — model TITIP-TUGAS
+	// (callback via MCP): app titip instruksi ke Hermes lewat /v1/agent-task
+	// (fire-and-forget), Hermes lapor balik lewat MCP tool save_playbook_job.
+	// Ini SATU-SATUNYA jalur generate playbook (tender/prospect tidak punya).
+	playbookJobRepo := repository.NewPlaybookJobRepo(db)
+	// Job yang masih "berjalan" saat server restart tak akan pernah dilapor —
+	// tandai failed sekali di boot.
+	if err := playbookJobRepo.FailInterrupted(context.Background()); err != nil {
+		log.Printf("playbook jobs: gagal menyapu job terputus: %v", err)
+	}
+	var agentRunner hermes.AgentTaskRunner
+	if r, ok := hc.(hermes.AgentTaskRunner); ok {
+		agentRunner = r
+	}
+	playbookJobSvc := service.NewPlaybookJobService(playbookJobRepo, agentRunner, profileSvc, eventSvc, cfg.InternalAPIBaseURL, cfg.CronTriggerSecret)
+
+	// Analisa AI memakai jalur titip-tugas yang SAMA dengan playbook, jadi ia
+	// butuh AgentTaskRunner (bukan Client biasa) agar bisa fire-and-forget.
+	attachmentReader := handlers.NewEventAttachmentReader(cfg.UploadDir)
+	eventAnalysisSvc := service.NewEventAnalysisService(eventSvc, profileSvc, agentRunner, attachmentReader, cfg.InternalAPIBaseURL, cfg.CronTriggerSecret)
+	eventAnalysisH := handlers.NewEventAnalysisHandler(eventAnalysisSvc)
+	playbookJobH := handlers.NewPlaybookJobHandler(playbookJobSvc, cfg.UploadDir)
+
+	// Reaper berkala: job yang mandek (Hermes tak pernah lapor balik) ditandai
+	// gagal agar UI tidak "Diproses" selamanya. Ambangnya HARUS lebih longgar
+	// dari total waktu wajar satu tugas panjang: 3 percobaan x
+	// HERMES_API_CALL_STALE_TIMEOUT (default 600 detik) = ~30 menit. Kalau
+	// lebih ketat, job yang sebenarnya masih berjalan ikut dibunuh.
+	go func() {
+		ticker := time.NewTicker(2 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := playbookJobSvc.ReapStale(rctx, 40*time.Minute); err != nil {
+				log.Printf("playbook reaper: %v", err)
+			}
+			// Analisa event memakai jalur asinkron yang sama, jadi butuh jaring
+			// pengaman yang sama: tanpa ini, event yang laporannya tidak pernah
+			// datang akan terkunci "running" selamanya.
+			if err := eventAnalysisSvc.ReapStale(rctx, 40*time.Minute); err != nil {
+				log.Printf("event analysis reaper: %v", err)
+			}
+			cancel()
+		}
+	}()
 
 	dashboardSvc := service.NewDashboardService(prospectRepo, tenderRepo)
 	dashboardH := handlers.NewDashboardHandler(dashboardSvc)
@@ -197,20 +250,6 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	tenderAssist := ai.NewTenderAssist(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
 	tenderAssistH := handlers.NewTenderAssistHandler(tenderAssist, tenderSvc, profileSvc)
 
-	// Saat tender temuan AI DITERIMA dari Radar Tender, pre-generate playbook
-	// di background (skor sudah ada dari pipeline discovery) — halaman detail
-	// langsung terisi konten AI tanpa menunggu klik generate manual.
-	tenderSvc.SetAIWarmup(func(tenderID string) {
-		wctx, wcancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer wcancel()
-		if _, err := playbookSvc.Generate(wctx, ai.ScoreTargetTender, tenderID); err != nil {
-			log.Printf("ai warmup: playbook untuk tender %s gagal: %v", tenderID, err)
-		}
-	})
-
-	eventAnalyzer := ai.NewEventAnalyzer(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
-	eventAnalysisH := handlers.NewEventAnalysisHandler(eventAnalyzer, eventSvc, profileSvc)
-
 	discoveryRunRepo := repository.NewDiscoveryRunRepo(db)
 	discoveryCrawler := ai.NewHermesCrawler(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
 	discoveryOrchestrator := ai.NewDiscoveryOrchestrator(discoveryCrawler, sourceRepo, profileSvc, auditRepo)
@@ -223,7 +262,7 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	// constructed Scheduler would let their period-bucketed idempotency
 	// keys and DiscoveryService instances drift apart.
 	scheduler := ai.NewScheduler(profileSvc, discoverySvc, schedulerTickInterval)
-	internalH := handlers.NewInternalHandler(scheduler, cfg.CronTriggerSecret)
+	internalH := handlers.NewInternalHandler(scheduler, cfg.CronTriggerSecret, playbookJobSvc, eventAnalysisSvc)
 
 	// Admin Hermes TUI (native Hermes CLI/TUI over a browser terminal,
 	// proxied to the hermes-tui/ttyd sidecar) — feature degrades to simply
@@ -246,6 +285,7 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 		ProspectRepo: prospectRepo,
 		Audit:        auditRepo,
 		Playbook:     playbookDraftRepo,
+		PlaybookJob:  playbookJobRepo,
 	})
 	e.Any("/mcp", echo.WrapHandler(mcp.Handler(mcpSrv)), mcp.BearerAuth(cfg.SalesMCPToken))
 
@@ -254,12 +294,19 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	// caller is the Hermes cron job's agent turn, not a logged-in user.
 	e.POST("/internal/discovery/trigger", internalH.TriggerDiscovery)
 	e.GET("/internal/discovery/trigger", internalH.TriggerDiscovery)
+	// Callback bridge saat playbook selesai (fire-and-forget model).
+	e.POST("/internal/playbook-jobs/:id/complete", internalH.CompletePlaybookJob)
+	e.POST("/internal/events/:id/analysis-complete", internalH.CompleteEventAnalysis)
 
 	api := e.Group("/api")
 
 	// Public auth routes (no JWT required).
 	api.POST("/auth/login", authH.Login)
 	api.POST("/auth/refresh", authH.Refresh)
+
+	// Public feedback pasca-proyek (link dibagikan ke client, tanpa login).
+	api.GET("/public/feedback/:token", feedbackH.PublicInfo)
+	api.POST("/public/feedback/:token", feedbackH.PublicSubmit)
 
 	// Protected routes — require valid JWT.
 	authd := api.Group("", auth.JWTMiddleware(cfg.JWTSecret))
@@ -344,22 +391,34 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	tenders.GET("/:id/score", scoreH.GetTenderScore)
 	tenders.POST("/:id/doc-checklist", tenderAssistH.DocChecklist)
 	tenders.POST("/:id/proposal-draft", tenderAssistH.ProposalDraft)
-	tenders.POST("/:id/playbook", playbookH.GenerateTender)
-	tenders.POST("/:id/playbook/from-document", playbookH.GenerateTenderFromDocument)
-	tenders.GET("/:id/playbooks", playbookH.ListTenderPlaybooks)
 
 	// Events — semua role yang punya CapCRUDData.
+	projects := authd.Group("/projects", auth.RequireCapability(auth.CapCRUDData))
+	projects.GET("", projectH.List)
+	projects.POST("", projectH.Create)
+	projects.GET("/summary", projectH.Summary)
+	projects.GET("/:id", projectH.Get)
+	projects.PUT("/:id", projectH.Update)
+	projects.DELETE("/:id", projectH.Delete)
+	projects.POST("/:id/activities", projectH.AddActivity)
+
+	feedback := authd.Group("/feedback", auth.RequireCapability(auth.CapCRUDData))
+	feedback.GET("", feedbackH.List)
+	feedback.POST("", feedbackH.Create)
+	feedback.GET("/analytics", feedbackH.Analytics)
+	feedback.DELETE("/:id", feedbackH.Delete)
+
 	events := authd.Group("/events", auth.RequireCapability(auth.CapCRUDData))
 	events.GET("", eventH.List)
 	events.POST("", eventH.Create)
 	events.GET("/:id", eventH.Get)
 	events.PUT("/:id", eventH.Update)
 	events.DELETE("/:id", eventH.Delete)
+	events.POST("/attachments", eventH.UploadAttachment)
 	events.POST("/:id/convert", eventH.Convert)
 	events.POST("/:id/analyze", eventAnalysisH.Analyze)
-	events.POST("/:id/playbook", playbookH.GenerateEvent)
-	events.POST("/:id/playbook/from-document", playbookH.GenerateEventFromDocument)
-	events.GET("/:id/playbooks", playbookH.ListEventPlaybooks)
+	// Generate playbook terstandarisasi dari konteks event (async job).
+	events.POST("/:id/playbook-job", playbookJobH.CreateFromEvent)
 
 	// Prospects — semua role yang punya CapCRUDData.
 	prospects := authd.Group("/prospects", auth.RequireCapability(auth.CapCRUDData))
@@ -371,17 +430,15 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	prospects.PATCH("/:id/stage", prospectH.UpdateStage)
 	prospects.POST("/:id/score", scoreH.ScoreProspect)
 	prospects.GET("/:id/score", scoreH.GetProspectScore)
-	prospects.POST("/:id/playbook", playbookH.GenerateProspect)
-	prospects.POST("/:id/playbook/from-document", playbookH.GenerateProspectFromDocument)
-	prospects.GET("/:id/playbooks", playbookH.ListProspectPlaybooks)
 
-	// Playbooks — akses by-id lintas target-type (CapCRUDData, sama seperti tenders/prospects).
-	playbooks := authd.Group("/playbooks", auth.RequireCapability(auth.CapCRUDData))
-	// Rute statis "custom" HARUS terdaftar sebelum rute param ":id".
-	playbooks.GET("/custom", playbookH.ListCustom)
-	playbooks.POST("/custom", playbookH.GenerateCustom)
-	playbooks.GET("/:id", playbookH.Get)
-	playbooks.POST("/:id/refine", playbookH.Refine)
+	// Playbook jobs (menu Playbooks) — generate async + riwayat status.
+	playbookJobs := authd.Group("/playbook-jobs", auth.RequireCapability(auth.CapCRUDData))
+	playbookJobs.GET("", playbookJobH.List)
+	playbookJobs.POST("", playbookJobH.Create)
+	playbookJobs.GET("/:id", playbookJobH.Get)
+	playbookJobs.POST("/:id/refine", playbookJobH.Refine)
+	playbookJobs.POST("/:id/retry", playbookJobH.Retry)
+	playbookJobs.DELETE("/:id", playbookJobH.Delete)
 
 	// Profile ("Otak Agent") — GET boleh semua role (SALES read-only),
 	// PUT (buat versi baru) hanya OPS/MANAGER/ADMIN.

@@ -17,6 +17,8 @@ import (
 var writeToolWhitelist = map[string]bool{
 	"update_prospect_stage": true,
 	"save_playbook_draft":   true,
+	"save_playbook_job":     true,
+	"fail_playbook_job":     true,
 }
 
 // addWriteTool registers tool only if its name is in writeToolWhitelist — a
@@ -48,6 +50,78 @@ func registerWriteTools(s *mcpserver.MCPServer, deps Deps) {
 		mcpgo.WithString("title", mcpgo.Description("Judul draft (opsional)")),
 		mcpgo.WithObject("content", mcpgo.Required(), mcpgo.Description("Konten draft playbook (objek JSON bebas — mis. sections)")),
 	), savePlaybookDraftHandler(deps))
+
+	addWriteTool(s, mcpgo.NewTool("save_playbook_job",
+		mcpgo.WithDescription("Simpan HASIL AKHIR playbook ke sebuah job yang sedang diproses (menu Playbooks). Panggil ini SETELAH selesai menyusun playbook. Job akan berubah status menjadi selesai (success)."),
+		mcpgo.WithString("job_id", mcpgo.Required(), mcpgo.Description("ID job playbook (UUID) yang diberikan pada instruksi tugas")),
+		mcpgo.WithObject("content", mcpgo.Required(), mcpgo.Description("Objek playbook lengkap: {summary, value_prop, stakeholders[], strategy_checklist[], timeline[], risks[], next_actions[], timeline_plan[{activity,start_day,duration_days}]}")),
+	), savePlaybookJobHandler(deps))
+
+	addWriteTool(s, mcpgo.NewTool("fail_playbook_job",
+		mcpgo.WithDescription("Tandai job playbook GAGAL bila kamu tidak bisa menyelesaikannya. Sertakan alasan singkat."),
+		mcpgo.WithString("job_id", mcpgo.Required(), mcpgo.Description("ID job playbook (UUID)")),
+		mcpgo.WithString("reason", mcpgo.Required(), mcpgo.Description("Alasan singkat kegagalan")),
+	), failPlaybookJobHandler(deps))
+}
+
+func savePlaybookJobHandler(deps Deps) mcpserver.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		if deps.PlaybookJob == nil {
+			return mcpgo.NewToolResultError("playbook job tidak dikonfigurasi"), nil
+		}
+		jobID, err := req.RequireString("job_id")
+		if err != nil {
+			return mcpgo.NewToolResultError("job_id wajib diisi"), nil
+		}
+		contentArg, ok := req.GetArguments()["content"]
+		if !ok || contentArg == nil {
+			return mcpgo.NewToolResultError("content wajib diisi"), nil
+		}
+		contentJSON, err := json.Marshal(contentArg)
+		if err != nil {
+			return mcpgo.NewToolResultError("content tidak valid"), nil
+		}
+
+		job, err := deps.PlaybookJob.GetByID(ctx, jobID)
+		if err != nil {
+			return toolResultFromErr(err, "job playbook tidak ditemukan")
+		}
+		job.Status = domain.PlaybookJobSuccess
+		job.Content = contentJSON
+		job.ErrorMessage = nil
+		if err := deps.PlaybookJob.Update(ctx, job); err != nil {
+			return toolResultFromErr(err, "gagal menyimpan hasil playbook")
+		}
+
+		writeAudit(ctx, deps, "save_playbook_job", "playbook_job", jobID, map[string]any{"status": "success"})
+		return mcpgo.NewToolResultText("Playbook tersimpan, job ditandai selesai."), nil
+	}
+}
+
+func failPlaybookJobHandler(deps Deps) mcpserver.ToolHandlerFunc {
+	return func(ctx context.Context, req mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+		if deps.PlaybookJob == nil {
+			return mcpgo.NewToolResultError("playbook job tidak dikonfigurasi"), nil
+		}
+		jobID, err := req.RequireString("job_id")
+		if err != nil {
+			return mcpgo.NewToolResultError("job_id wajib diisi"), nil
+		}
+		reason := req.GetString("reason", "Gagal menyusun playbook.")
+
+		job, err := deps.PlaybookJob.GetByID(ctx, jobID)
+		if err != nil {
+			return toolResultFromErr(err, "job playbook tidak ditemukan")
+		}
+		job.Status = domain.PlaybookJobFailed
+		job.ErrorMessage = &reason
+		if err := deps.PlaybookJob.Update(ctx, job); err != nil {
+			return toolResultFromErr(err, "gagal menandai job gagal")
+		}
+
+		writeAudit(ctx, deps, "fail_playbook_job", "playbook_job", jobID, map[string]any{"reason": reason})
+		return mcpgo.NewToolResultText("Job ditandai gagal."), nil
+	}
 }
 
 func updateProspectStageHandler(deps Deps) mcpserver.ToolHandlerFunc {

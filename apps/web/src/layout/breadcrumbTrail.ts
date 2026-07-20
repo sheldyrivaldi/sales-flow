@@ -41,6 +41,19 @@ function childLabel(path: string): string | undefined {
   return undefined
 }
 
+/** groupParentOf mengembalikan parent nav yang memiliki `path` sebagai child
+ * TANPA berbagi prefix path (grup seperti Pra-Proyek yang anak-anaknya
+ * /discovery, /tenders, ... adalah path top-level). Parent berbagi prefix
+ * (mis. /settings, /ongoing) sudah tertangani oleh segment-walk biasa. */
+function groupParentOf(path: string): string | undefined {
+  for (const item of navItems) {
+    if (!item.children) continue
+    if (path.startsWith(item.path + '/') || path === item.path) continue
+    if (item.children.some((c) => c.path === path)) return item.label
+  }
+  return undefined
+}
+
 /** buildTrail maps a pathname to its breadcrumb trail, root-first. Returns a
  * single-item trail (or empty for "/") for top-level pages — callers should
  * only render the breadcrumb bar when the trail has more than one item, since
@@ -59,6 +72,14 @@ export function buildTrail(pathname: string): Crumb[] {
     const isLast = i === segments.length - 1
     const label = topLevelLabel(acc) ?? childLabel(acc) ?? matchStatic(acc) ?? segments[i]
     trail.push({ label, href: isLast ? undefined : acc })
+  }
+
+  // Grup nav tanpa prefix bersama (Pra-Proyek → /tenders dst.): sisipkan
+  // crumb parent di depan supaya hirarki menu terbaca — tanpa href karena
+  // grup bukan halaman (Back akan jatuh ke "/").
+  const groupLabel = groupParentOf('/' + segments[0])
+  if (groupLabel) {
+    trail.unshift({ label: groupLabel })
   }
 
   return trail

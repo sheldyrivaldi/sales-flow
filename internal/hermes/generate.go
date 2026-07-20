@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // --- Wire types (privat) ---
@@ -53,6 +54,19 @@ func stripJSONFence(s string) string {
 		s = s[:end]
 	}
 	return strings.TrimSpace(s)
+}
+
+// looksLikeProviderError mendeteksi teks yang jelas-jelas pesan kegagalan
+// provider (bukan JSON), sehingga tidak salah di-parse sebagai output.
+func looksLikeProviderError(s string) bool {
+	t := strings.TrimSpace(s)
+	if strings.HasPrefix(t, "{") || strings.HasPrefix(t, "[") {
+		return false
+	}
+	lower := strings.ToLower(t)
+	return strings.Contains(lower, "api call failed") ||
+		strings.Contains(lower, "connection error") ||
+		strings.Contains(lower, "broken pipe")
 }
 
 // doResponses melakukan satu round-trip ke /v1/responses dan mengembalikan
@@ -103,13 +117,67 @@ func (c *httpClient) doResponses(ctx context.Context, prompt string, schema any,
 		return nil, fmt.Errorf("hermes generate: respon kosong")
 	}
 
+	// Safety net: bila bridge tetap mengembalikan penanda kegagalan provider
+	// sebagai teks (mis. "API call failed after N retries: ..."), jangan coba
+	// parse sebagai JSON — surfacing sebagai error yang jelas.
+	if looksLikeProviderError(out) {
+		return nil, fmt.Errorf("hermes generate: provider gagal: %.200s", out)
+	}
+
 	return json.RawMessage(out), nil
 }
 
-// generateJSON adalah implementasi bersama GenerateJSON/GenerateJSONFromDocument:
-// panggil /v1/responses, retry 1x dengan instruksi eksplisit bila output
-// pertama bukan JSON valid. filename/fileBytes kosong = tanpa lampiran.
+// isTransientProviderErr menandai error yang layak dicoba ulang: kegagalan
+// koneksi/jaringan ke provider yang sifatnya sementara (bukan error prompt/
+// schema). Endpoint provider kadang melempar "Connection error" secara
+// intermiten — retry di sini memberi kesempatan koneksi yang sehat.
+func isTransientProviderErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"provider gagal", "connection error", "broken pipe", "api call failed",
+		"connection reset", "eof", "do request", "timeout", "502",
+	} {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// generateJSON adalah implementasi bersama GenerateJSON/GenerateJSONFromDocument.
+// Membungkus generateJSONAttempt dengan retry berjenjang khusus kegagalan
+// koneksi provider yang sementara — tiap attempt punya backoff dan sadar
+// pembatalan context (deadline job).
 func (c *httpClient) generateJSON(ctx context.Context, prompt string, schema any, sk SessionKey, filename string, fileBytes []byte) (json.RawMessage, error) {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			// Backoff singkat sebelum mencoba lagi; hormati deadline context.
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(time.Duration(attempt) * 3 * time.Second):
+			}
+		}
+		raw, err := c.generateJSONAttempt(ctx, prompt, schema, sk, filename, fileBytes)
+		if err == nil {
+			return raw, nil
+		}
+		lastErr = err
+		if !isTransientProviderErr(err) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf("hermes generate: gagal setelah %d percobaan: %w", maxAttempts, lastErr)
+}
+
+// generateJSONAttempt melakukan satu kali generate: panggil /v1/responses,
+// retry 1x dengan instruksi eksplisit bila output pertama bukan JSON valid.
+func (c *httpClient) generateJSONAttempt(ctx context.Context, prompt string, schema any, sk SessionKey, filename string, fileBytes []byte) (json.RawMessage, error) {
 	raw, err := c.doResponses(ctx, prompt, schema, sk, filename, fileBytes)
 	if err != nil {
 		return nil, err

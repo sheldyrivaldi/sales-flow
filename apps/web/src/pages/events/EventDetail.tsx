@@ -1,19 +1,20 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router'
-import { ArrowLeft, Edit2, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Edit2, CalendarDays, MapPin, Building2, Users, Lock } from 'lucide-react'
 
 import Button from '../../components/ui/Button'
-import ConfirmDialog from '../../components/ui/ConfirmDialog'
 import Skeleton from '../../components/ui/Skeleton'
-import { toast } from '../../lib/toast'
+import EmptyState from '../../components/ui/EmptyState'
 import { formatTanggal } from '../../lib/format'
 import { cn } from '../../lib/cn'
 
-import { useEvent, useConvertEvent, EVENT_TYPE_LABELS, EVENT_STATUS_LABELS } from '../../api/events'
+import { useEvent, EVENT_TYPE_LABELS, EVENT_STATUS_LABELS } from '../../api/events'
 import type { EventType, EventStatus } from '../../api/events'
-import EventFormDrawer from './EventFormDrawer'
+import EventFormModal from './EventFormModal'
 import EventAnalysisPanel from '../../components/events/EventAnalysisPanel'
-import PlaybookPanel from '../../components/PlaybookPanel'
+import EventAttachmentsSection from '../../components/events/EventAttachmentsSection'
+import EventParticipantsSection from '../../components/events/EventParticipantsSection'
+import EventPlaybookCard from '../../components/events/EventPlaybookCard'
 
 const TYPE_COLORS: Record<EventType, string> = {
   EXPO: 'bg-sky-100 text-sky-700',
@@ -30,34 +31,47 @@ const STATUS_COLORS: Record<EventStatus, string> = {
   CANCELLED: 'bg-rose-100 text-rose-700',
 }
 
+/** Satu fakta ringkas pada bar identitas event. */
+function Fact({ icon: Icon, label, value }: { icon: typeof MapPin; label: string; value: string }) {
+  return (
+    <div className="flex items-start gap-2 min-w-0">
+      <Icon className="w-4 h-4 text-fg-subtle mt-0.5 shrink-0" aria-hidden="true" />
+      <div className="min-w-0">
+        <p className="text-caption text-fg-subtle">{label}</p>
+        <p className="text-body text-fg truncate" title={value}>{value}</p>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Halaman detail event.
+ *
+ * Urutan seksi mengikuti bobot nilainya, bukan urutan teknis: Analisa AI
+ * diletakkan PALING ATAS karena di situlah nilai menu ini — ringkasan, apa
+ * yang bisa diolah di internal, dan peluang klien baru. Identitas event cukup
+ * jadi bar tipis; ia konteks, bukan tujuan.
+ *
+ * Tidak ada konversi ke prospek di sini: event adalah manajemen acara, dan
+ * jalur prospek berjalan lewat menu Tender. Organisasi yang layak didekati
+ * muncul sebagai peluang klien di hasil analisa beserta cara masuknya.
+ */
 export default function EventDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-
   const { data: event, isLoading } = useEvent(id)
-  const convertMutation = useConvertEvent()
-
   const [editOpen, setEditOpen] = useState(false)
-  const [confirmConvert, setConfirmConvert] = useState(false)
-
-  async function handleConvert() {
-    if (!id) return
-    try {
-      await convertMutation.mutateAsync(id)
-      toast.success('Event berhasil dikonversi ke prospek.')
-      setConfirmConvert(false)
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : ''
-      toast.error(msg.includes('sudah dikonversi') ? 'Event ini sudah pernah dikonversi ke prospek.' : 'Gagal mengonversi event.')
-      setConfirmConvert(false)
-    }
-  }
+  // Selama analisa berjalan, event dikunci dari SEMUA perubahan: edit,
+  // lampiran, dan peserta. Kalau datanya bergeser di tengah proses, hasil
+  // analisa tidak lagi cocok dengan event yang tersimpan.
+  const locked = event?.analysis_status === 'running'
 
   if (isLoading) {
     return (
       <div className="p-6 flex flex-col gap-4">
         <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-40 w-full" />
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-64 w-full" />
       </div>
     )
   }
@@ -65,28 +79,30 @@ export default function EventDetail() {
   if (!event) {
     return (
       <div className="p-6">
-        <p className="text-fg-muted">Event tidak ditemukan.</p>
+        <EmptyState
+          icon={<CalendarDays className="w-6 h-6" />}
+          title="Event tidak ditemukan"
+          description="Event mungkin sudah dihapus."
+          action={<Button size="sm" onClick={() => navigate('/events')}>Kembali ke Events</Button>}
+        />
       </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-2xl">
-      {/* Breadcrumb / back */}
-      <button
-        type="button"
-        onClick={() => navigate('/events')}
-        className="inline-flex items-center gap-1.5 text-caption text-fg-muted hover:text-fg transition-colors"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        Kembali ke Events
-      </button>
-
+    <div className="flex flex-col gap-5 p-6 animate-page-enter">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex flex-col gap-2">
-          <h1 className="text-h2 font-semibold text-fg">{event.name}</h1>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <button
+            type="button"
+            onClick={() => navigate('/events')}
+            className="inline-flex items-center gap-1 text-caption text-fg-muted hover:text-primary transition-colors mb-1"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" /> Events
+          </button>
           <div className="flex items-center gap-2 flex-wrap">
+            <h1 className="text-h2 font-semibold text-fg">{event.name}</h1>
             <span className={cn('inline-flex items-center px-2 py-0.5 rounded-pill text-caption font-medium', TYPE_COLORS[event.type])}>
               {EVENT_TYPE_LABELS[event.type]}
             </span>
@@ -95,86 +111,58 @@ export default function EventDetail() {
             </span>
           </div>
         </div>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={locked}
+          title={locked ? 'Terkunci selama analisa berjalan' : undefined}
+          leftIcon={locked ? <Lock className="w-3.5 h-3.5" /> : <Edit2 className="w-3.5 h-3.5" />}
+          onClick={() => setEditOpen(true)}
+        >
+          Edit Event
+        </Button>
+      </div>
 
-        <div className="flex gap-2 flex-shrink-0">
-          <Button
-            variant="secondary"
-            size="sm"
-            leftIcon={<Edit2 className="w-4 h-4" />}
-            onClick={() => setEditOpen(true)}
-          >
-            Edit
-          </Button>
-          <Button
-            size="sm"
-            leftIcon={<RefreshCw className="w-4 h-4" />}
-            onClick={() => setConfirmConvert(true)}
-          >
-            + Konversi ke Prospek
-          </Button>
+      {/* Bar identitas — konteks ringkas, sengaja tidak mendominasi halaman. */}
+      <div className="bg-surface border border-line rounded-card p-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Fact icon={CalendarDays} label="Tanggal" value={event.date ? formatTanggal(event.date) : '—'} />
+        <Fact icon={MapPin} label="Lokasi" value={event.location ?? '—'} />
+        <Fact icon={Building2} label="Penyelenggara" value={event.organizer ?? '—'} />
+        <Fact icon={Users} label="Peserta diundang" value={`${event.participant_emails?.length ?? 0} orang`} />
+      </div>
+
+      {/* NILAI UTAMA — diletakkan paling atas dengan sengaja. */}
+      <EventAnalysisPanel
+        eventId={event.id}
+        analysis={event.analysis}
+        analyzedAt={event.analyzed_at}
+        status={event.analysis_status}
+        error={event.analysis_error}
+        attachmentCount={event.attachments?.length ?? 0}
+      />
+
+      {/* Playbook event — hasilnya tampil di sini juga, bukan cuma di menu Playbooks. */}
+      <EventPlaybookCard eventId={event.id} eventName={event.name} />
+
+      {/* Lampiran: lihat, tambah, hapus langsung dari sini. */}
+      <EventAttachmentsSection eventId={event.id} attachments={event.attachments ?? []} locked={locked} />
+
+      {/* Peserta: kelola + kirim undangan lewat aplikasi email. */}
+      <EventParticipantsSection event={event} locked={locked} />
+
+      {event.notes && (
+        <div className="bg-surface border border-line rounded-card p-4">
+          <p className="text-caption font-medium text-fg-muted mb-1">Catatan</p>
+          <p className="text-body text-fg whitespace-pre-wrap">{event.notes}</p>
         </div>
-      </div>
+      )}
 
-      {/* Detail card */}
-      <div className="bg-surface border border-line rounded-card p-5 flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-x-8 gap-y-3">
-          <InfoRow label="Tanggal" value={event.date ? formatTanggal(event.date) : '—'} />
-          <InfoRow label="Lokasi" value={event.location ?? '—'} />
-          <InfoRow label="Organizer" value={event.organizer ?? '—'} />
-          <InfoRow label="Ditambahkan" value={formatTanggal(event.created_at)} />
-        </div>
-
-        {event.notes && (
-          <div>
-            <p className="text-caption font-medium text-fg-muted mb-1">Catatan</p>
-            <p className="text-body text-fg whitespace-pre-wrap">{event.notes}</p>
-          </div>
-        )}
-      </div>
-
-      {/* Analisa peserta pasca-event: upload daftar peserta → kuadran + timeline */}
-      <EventAnalysisPanel eventId={event.id} />
-
-      {/* Playbook khusus event ini — bisa digenerate, dari dokumen, direvisi
-          via prompt, dan diekspor ke PPT */}
-      <PlaybookPanel targetType="event" targetId={event.id} />
-
-      {/* Prospek dari event (placeholder — EP-07 akan mengisi list prospek tertaut) */}
-      <div className="bg-surface border border-line rounded-card p-5">
-        <h2 className="text-h3 font-semibold text-fg mb-1">Kontak / Prospek dari Event</h2>
-        <p className="text-caption text-fg-muted">
-          Daftar prospek yang bersumber dari event ini akan tampil di sini setelah EP-07 selesai.
-        </p>
-      </div>
-
-      {/* Edit drawer */}
-      <EventFormDrawer
+      <EventFormModal
         open={editOpen}
         onClose={() => setEditOpen(false)}
         event={event}
         onSaved={() => setEditOpen(false)}
       />
-
-      {/* Convert confirm */}
-      <ConfirmDialog
-        open={confirmConvert}
-        title="Konversi ke Prospek?"
-        description={`Event "${event.name}" akan dikonversi menjadi prospek baru dengan source dari event ini.`}
-        confirmLabel="Konversi"
-        tone="primary"
-        loading={convertMutation.isPending}
-        onConfirm={handleConvert}
-        onCancel={() => setConfirmConvert(false)}
-      />
-    </div>
-  )
-}
-
-function InfoRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <p className="text-caption font-medium text-fg-muted">{label}</p>
-      <p className="text-body text-fg">{value}</p>
     </div>
   )
 }

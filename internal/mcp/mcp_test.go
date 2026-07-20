@@ -351,6 +351,7 @@ var wantTools = []string{
 	"list_prospects", "get_prospect",
 	"get_pipeline_summary", "get_revenue_summary", "get_company_profile",
 	"update_prospect_stage", "save_playbook_draft",
+	"save_playbook_job", "fail_playbook_job",
 }
 
 func TestMCP_ToolsList_MatchesContract(t *testing.T) {

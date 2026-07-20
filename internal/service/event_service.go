@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/mail"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -40,13 +42,20 @@ func (s *EventService) Create(ctx context.Context, req *dto.EventCreateRequest) 
 		status = s
 	}
 
+	emails, err := normalizeEmails(req.ParticipantEmails)
+	if err != nil {
+		return nil, err
+	}
+
 	e := &domain.Event{
-		Name:      req.Name,
-		Type:      eventType,
-		Status:    status,
-		Location:  req.Location,
-		Organizer: req.Organizer,
-		Notes:     req.Notes,
+		Name:              req.Name,
+		Type:              eventType,
+		Status:            status,
+		Location:          req.Location,
+		Organizer:         req.Organizer,
+		Notes:             req.Notes,
+		ParticipantEmails: emails,
+		Attachments:       toAttachments(req.Attachments),
 	}
 
 	if req.Date != nil {
@@ -121,11 +130,91 @@ func (s *EventService) Update(ctx context.Context, id string, req *dto.EventUpda
 	if req.Notes != nil {
 		e.Notes = req.Notes
 	}
+	// Pointer nil = field tidak disinggung; slice kosong = sengaja dikosongkan.
+	if req.ParticipantEmails != nil {
+		emails, eerr := normalizeEmails(*req.ParticipantEmails)
+		if eerr != nil {
+			return nil, eerr
+		}
+		e.ParticipantEmails = emails
+	}
+	if req.Attachments != nil {
+		e.Attachments = toAttachments(*req.Attachments)
+	}
 
 	if err := s.repo.Update(ctx, e); err != nil {
 		return nil, fmt.Errorf("event.Update: %w", err)
 	}
 	return e, nil
+}
+
+// maxEventParticipants membatasi undangan per event agar payload tetap wajar.
+const maxEventParticipants = 200
+
+// normalizeEmails merapikan daftar undangan: dipangkas, dijadikan huruf kecil,
+// divalidasi, dan dibuang duplikatnya. Email peserta TIDAK harus terdaftar
+// sebagai user aplikasi — yang divalidasi hanya bentuk alamatnya.
+func normalizeEmails(raw []string) ([]string, error) {
+	if len(raw) == 0 {
+		return []string{}, nil
+	}
+	seen := make(map[string]bool, len(raw))
+	out := make([]string, 0, len(raw))
+	for _, r := range raw {
+		e := strings.ToLower(strings.TrimSpace(r))
+		if e == "" {
+			continue
+		}
+		// mail.ParseAddress saja tidak cukup: ia menerima "Nama <a@b>" dan
+		// domain tanpa titik seperti "a@b" (sah untuk host lokal, tapi tidak
+		// pernah sah untuk undangan ke peserta luar). Syarat tambahan di sini
+		// menyamakan aturan dengan validasi di frontend, supaya alamat yang
+		// ditolak di form tidak diam-diam lolos lewat API.
+		addr, err := mail.ParseAddress(e)
+		if err != nil || addr.Address != e || !hasDottedDomain(e) {
+			return nil, httperr.NewBadRequest("INVALID_EMAIL", fmt.Sprintf("email peserta tidak valid: %s", r))
+		}
+		if seen[e] {
+			continue
+		}
+		seen[e] = true
+		out = append(out, e)
+	}
+	if len(out) > maxEventParticipants {
+		return nil, httperr.NewBadRequest("TOO_MANY_PARTICIPANTS",
+			fmt.Sprintf("maksimal %d peserta per event", maxEventParticipants))
+	}
+	return out, nil
+}
+
+// hasDottedDomain memastikan bagian setelah "@" punya titik dengan label tak
+// kosong di kedua sisinya (mis. "contoh.com", bukan "b", ".com", atau "b.").
+func hasDottedDomain(email string) bool {
+	at := strings.LastIndex(email, "@")
+	if at < 0 {
+		return false
+	}
+	domain := email[at+1:]
+	dot := strings.LastIndex(domain, ".")
+	return dot > 0 && dot < len(domain)-1
+}
+
+func toAttachments(in []dto.EventAttachmentDTO) []domain.EventAttachment {
+	out := make([]domain.EventAttachment, 0, len(in))
+	for _, a := range in {
+		out = append(out, domain.EventAttachment{Name: a.Name, URL: a.URL, Mime: a.Mime, Size: a.Size})
+	}
+	return out
+}
+
+// SaveAnalysisState menyimpan perubahan pada field analisa (hasil, status,
+// error, waktu) apa adanya. Dipakai EventAnalysisService yang sudah menyiapkan
+// nilai-nilainya.
+func (s *EventService) SaveAnalysisState(ctx context.Context, e *domain.Event) error {
+	if err := s.repo.Update(ctx, e); err != nil {
+		return fmt.Errorf("event.SaveAnalysisState: %w", err)
+	}
+	return nil
 }
 
 // Delete removes an event by ID.

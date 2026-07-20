@@ -163,7 +163,7 @@ export default function TenderList() {
       <div className="flex items-center justify-between">
         <h1 className="text-h2 font-semibold text-fg">Tenders</h1>
         <Button leftIcon={<Plus className="w-4 h-4" />} onClick={openCreate}>
-          + Tender Baru
+          Tender Baru
         </Button>
       </div>
 
@@ -247,7 +247,7 @@ export default function TenderList() {
               description="Mulai tambahkan tender baru atau jalankan Radar Tender."
               action={
                 <Button size="sm" onClick={openCreate}>
-                  + Tender Baru
+                  Tender Baru
                 </Button>
               }
             />

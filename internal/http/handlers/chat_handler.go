@@ -2,14 +2,19 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"salespilot/internal/auth"
@@ -22,6 +27,46 @@ import (
 	"salespilot/internal/service"
 	"salespilot/internal/telemetry"
 )
+
+// mimeByExt maps a lowercase file extension to a content type — enough for the
+// chat attachment types (PDF + common images) so the browser opens rather than
+// downloads them.
+func mimeByExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".pdf":
+		return "application/pdf"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	case ".gif":
+		return "image/gif"
+	default:
+		return "application/octet-stream"
+	}
+}
+
+// saveChatAttachment decodes a base64 payload and writes it under
+// <uploadDir>/chat/<uuid><ext>, returning the public URL ("/uploads/chat/...")
+// and detected MIME. The UUID filename keeps stored files unguessable.
+func saveChatAttachment(uploadDir, filename, b64 string) (url, mime string, err error) {
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return "", "", fmt.Errorf("decode base64: %w", err)
+	}
+	ext := filepath.Ext(filename)
+	name := uuid.NewString() + ext
+	dir := filepath.Join(uploadDir, "chat")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", "", fmt.Errorf("mkdir: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), raw, 0o644); err != nil {
+		return "", "", fmt.Errorf("write file: %w", err)
+	}
+	return "/uploads/chat/" + name, mimeByExt(ext), nil
+}
 
 type ChatHandler struct {
 	svc    *service.ChatService
@@ -149,13 +194,13 @@ func (h *ChatHandler) Delete(c echo.Context) error {
 // membaca & menganalisa data ya, aksi tulis tidak. Dikirim sebagai system
 // message di SETIAP giliran (bukan hanya giliran pertama) supaya batasan
 // tetap berlaku sepanjang percakapan.
-const chatGuardrailPrompt = "Kamu adalah asisten AI SalesPilot untuk tim sales B2B. " +
+const chatGuardrailPrompt = "Kamu adalah asisten AI SalesFlow untuk tim sales B2B. " +
 	"Batasan KERAS untuk kanal chat ini: kamu HANYA boleh menjawab pertanyaan, menganalisa, merangkum, dan MEMBACA data " +
 	"(tender, prospek, event, profil perusahaan) atau mencari informasi publik. " +
 	"Kamu DILARANG melakukan aksi tulis dalam bentuk apa pun dari chat ini: dilarang membuat/mengubah/menghapus data aplikasi, " +
 	"dilarang membuat atau menulis file, dilarang menjalankan kode/perintah/skrip, dan dilarang memanggil tool yang bersifat menulis atau mengeksekusi. " +
 	"Bila user meminta aksi seperti itu, jelaskan dengan sopan bahwa aksi dilakukan lewat menu aplikasi terkait (mis. tombol di halaman Tender/Pipeline/Playbook), " +
-	"lalu bantu dengan analisa atau langkah panduannya. Jangan pernah menyebut nama teknologi/engine internal di balik layar — sebut dirimu sebagai AI SalesPilot."
+	"lalu bantu dengan analisa atau langkah panduannya. Jangan pernah menyebut nama teknologi/engine internal di balik layar — sebut dirimu sebagai AI SalesFlow."
 
 // Chat handles POST /api/conversations/:id/chat (SSE relay)
 func (h *ChatHandler) Chat(c echo.Context) error {
@@ -193,14 +238,22 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 		}
 	}
 
-	// Persist user message (and auto-set title if blank). The attachment's
-	// bytes are not persisted — only a marker so the history shows a file was
-	// sent with this turn.
-	persistedContent := req.Content
+	// Persist the attachment bytes to disk so the file stays openable from
+	// the conversation history (image preview / PDF open). Failure to save is
+	// non-fatal — the chat turn still proceeds, just without a stored file.
+	var attURL, attNamePtr, attMimePtr *string
 	if attachB64 != "" {
-		persistedContent += "\n\n[Lampiran: " + attachName + "]"
+		if url, mime, err := saveChatAttachment(h.cfg.UploadDir, attachName, attachB64); err != nil {
+			log.Printf("chat: gagal menyimpan lampiran: %v", err)
+		} else {
+			n := attachName
+			attURL, attNamePtr, attMimePtr = &url, &n, &mime
+		}
 	}
-	if _, err := h.svc.AppendUserMessage(c.Request().Context(), conv, persistedContent); err != nil {
+
+	// Persist user message (and auto-set title if blank). Attachment metadata
+	// (URL/name/mime) is stored so the history can render a clickable preview.
+	if _, err := h.svc.AppendUserMessageWithAttachment(c.Request().Context(), conv, req.Content, attURL, attNamePtr, attMimePtr); err != nil {
 		return httperr.Write(c, err)
 	}
 

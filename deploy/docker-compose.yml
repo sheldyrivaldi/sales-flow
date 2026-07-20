@@ -53,6 +53,20 @@ services:
         required: false
     environment:
       PORT: "8642"
+      # PENYEBAB UTAMA "API call failed after 3 retries" pada generate playbook.
+      # hermes-agent memutus panggilan non-streaming yang belum mengirim byte
+      # pertama dalam 90 detik (default _resolved_api_call_stale_timeout_base).
+      # Penskalaan otomatisnya hanya melihat panjang INPUT (>50rb token),
+      # sedangkan prompt kita kecil (~3rb token) tapi OUTPUT-nya besar (deck
+      # belasan KB) — jadi batas 90 detik selalu dipakai dan generasi panjang
+      # selalu diputus. Hermes sendiri sanggup long task; batas inilah yang
+      # perlu dilonggarkan.
+      HERMES_API_CALL_STALE_TIMEOUT: ${HERMES_API_CALL_STALE_TIMEOUT:-600}
+      # Model cadangan dicoba HANYA bila diisi. Sengaja kosong: tetap memakai
+      # satu model (HERMES_MODEL) supaya biaya tidak berubah. Isi hanya dengan
+      # model yang tersedia di provider openai-codex (gpt-5.5, gpt-5.6-sol,
+      # gpt-5.6-luna, gpt-5.6-terra) — di luar itu ditolak HTTP 400.
+      HERMES_MODEL_FALLBACKS: ${HERMES_MODEL_FALLBACKS:-}
       # Without this + the volume below, Hermes workspace memory
       # (MEMORY.md/USER.md + the holographic memory_store.db, both under
       # get_hermes_home()) lives on the container's ephemeral filesystem and
