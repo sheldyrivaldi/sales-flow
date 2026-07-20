@@ -32,6 +32,23 @@ func main() {
 	}
 	_ = aiAvailable
 
+	// Run schema migrations before anything else touches the database.
+	// Migrations are embedded into this binary at build time (see
+	// db/migrations/migrations.go), so this works self-contained against
+	// any DATABASE_URL — a company-managed external database, a fresh
+	// Kubernetes deployment, etc. — with no separate migrate step or
+	// init container required. Fatal on failure: without a schema, the
+	// admin seed below and the entire app are broken anyway.
+	// Set AUTO_MIGRATE=false to opt out (e.g. schema changes are managed
+	// out-of-band by a DBA on a company database).
+	if cfg.AutoMigrate {
+		if err := repository.RunMigrations(cfg); err != nil {
+			log.Fatalf("migrate: %v", err)
+		}
+	} else {
+		log.Println("migrate: AUTO_MIGRATE=false, skip (pastikan skema sudah di-apply manual)")
+	}
+
 	db, err := repository.Open(cfg)
 	if err != nil {
 		log.Fatalf("database: %v", err)

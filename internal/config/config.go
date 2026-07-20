@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -43,6 +44,14 @@ type Config struct {
 	SeedAdminEmail      string
 	SeedAdminPassword   string
 	UploadDir           string
+	// AutoMigrate controls whether RunMigrations (see
+	// internal/repository/migrate.go) executes on boot. Defaults to true —
+	// it's what makes the API self-sufficient against a fresh/company
+	// database with no separate migrate step. Set AUTO_MIGRATE=false when
+	// migrations are deliberately managed out-of-band (e.g. a DBA-controlled
+	// company database where schema changes must go through a review
+	// process instead of running automatically on every pod boot).
+	AutoMigrate bool
 	// ConfigEncKey encrypts ai_provider_setting.api_key_encrypted (EP-18
 	// ST-18.4, AES-256-GCM — see internal/auth/crypto.go). Optional: the
 	// AI Provider Config feature is simply unavailable without it, the
@@ -72,6 +81,7 @@ func Load() (*Config, error) {
 		SeedAdminPassword:     os.Getenv("SEED_ADMIN_PASSWORD"),
 		UploadDir:             getEnv("UPLOAD_DIR", "./data/uploads"),
 		ConfigEncKey:          os.Getenv("CONFIG_ENC_KEY"),
+		AutoMigrate:           getEnvBool("AUTO_MIGRATE", true),
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -111,4 +121,21 @@ func getEnv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// getEnvBool parses a boolean env var (strconv.ParseBool: "1"/"0",
+// "true"/"false", "TRUE"/"FALSE", etc.), falling back to def when unset or
+// unparsable (with a warning in the latter case so a typo isn't silently
+// ignored).
+func getEnvBool(key string, def bool) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		log.Printf("config: %s=%q invalid, pakai default %t", key, v, def)
+		return def
+	}
+	return b
 }
