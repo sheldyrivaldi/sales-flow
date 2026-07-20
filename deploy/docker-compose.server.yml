@@ -1,0 +1,80 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Compose PRODUKSI untuk server.
+#
+# Beda dari docker-compose.yml (dev lokal):
+#   • TANPA service `postgres`  → pakai Postgres eksternal yang sudah ada
+#     (lewat DATABASE_URL di .env.server).
+#   • TANPA service `hermes-tui` → pakai Hermes yang sudah berjalan lama di
+#     server. HERMES_TUI_BASE_URL menunjuk ke dashboard itu.
+#   • `hermes-bridge` MENUMPANG home dir Hermes yang sudah ada (bind mount),
+#     sehingga engine memakai login provider (OAuth) yang SUDAH dilakukan di
+#     Hermes existing — tidak perlu login ulang, tidak perlu Hermes baru.
+#
+# Yang dikelola compose ini HANYA tiga image milikmu: api, web, hermes-bridge.
+#
+# Jalankan dari folder deploy/:
+#   docker compose -f docker-compose.server.yml --env-file .env.server up -d --build
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  api:
+    build:
+      context: ../
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env.server
+        required: true
+    environment:
+      # DB EKSTERNAL — nilai penuh diisi di .env.server (DATABASE_URL).
+      UPLOAD_DIR: /app/data/uploads
+      # Engine (chat/playbook/analisa) → bridge di jaringan compose ini.
+      HERMES_BASE_URL: http://hermes-bridge:8642
+      # Callback internal untuk job async (playbook & analisa event) — nama
+      # service `api` di jaringan compose, bukan localhost.
+      INTERNAL_API_BASE_URL: http://api:8080
+    volumes:
+      - uploads:/app/data/uploads
+    ports:
+      - "${API_PORT:-8080}:8080"
+
+  web:
+    build:
+      context: ../
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-80}:80"
+    depends_on:
+      - api
+
+  hermes-bridge:
+    build:
+      context: ../services/hermes-bridge
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env.server
+        required: true
+    environment:
+      PORT: "8642"
+      # Long task: jangan diputus di 90 detik (lihat komentar di compose dev).
+      HERMES_API_CALL_STALE_TIMEOUT: ${HERMES_API_CALL_STALE_TIMEOUT:-600}
+      HERMES_MODEL_FALLBACKS: ${HERMES_MODEL_FALLBACKS:-}
+      # Home dir Hermes = milik Hermes existing (login provider ada di sini).
+      HERMES_HOME: /root/.hermes
+    volumes:
+      # INTI: bind mount home dir Hermes yang SUDAH ADA di host server ke dalam
+      # bridge. Dengan begini engine memakai login/OAuth yang sudah dilakukan
+      # lewat dashboard Hermes existing — tanpa login ulang, tanpa duplikasi.
+      # Isi HERMES_HOME_HOST_PATH di .env.server dengan path folder home Hermes
+      # di server (mis. /home/moonlay/.hermes atau /opt/hermes/data).
+      # Jika Hermes existing jalan sebagai container, ganti baris ini dengan
+      # nama volume-nya:  <nama_volume_hermes>:/root/.hermes  (external: true di
+      # bagian volumes bawah).
+      - ${HERMES_HOME_HOST_PATH:?set HERMES_HOME_HOST_PATH di .env.server}:/root/.hermes
+    # Sengaja TIDAK publish 8642 ke host — hanya dijangkau `api` lewat jaringan
+    # compose. Sama seperti dev: bridge tidak boleh terbuka ke luar.
+
+volumes:
+  uploads:

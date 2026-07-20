@@ -70,6 +70,35 @@ func NewHermesTuiHandler(repo domain.HermesTuiSessionRepository, cfg *config.Con
 			req.URL.Path = "/"
 		}
 		req.Header.Set("X-Forwarded-Prefix", hermestui.TUIBasePath)
+
+		// Autentikasi ke dashboard. Dashboard punya dua mode:
+		//   - token/--insecure: menerima X-Hermes-Session-Token (atau Bearer
+		//     legacy) yang nilainya = HERMES_DASHBOARD_SESSION_TOKEN.
+		// Menyuntikkan token di sini membuat SEMUA rute (bukan cuma yang
+		// dipegang SPA) lolos, termasuk saat dashboard berada di host lain.
+		// Tanpa ini, dashboard remote dalam mode token akan menolak sebagian
+		// rute. Di mode gated/OAuth token diabaikan (butuh cookie login), jadi
+		// menyetelnya tidak berbahaya.
+		if cfg.HermesTuiSessionToken != "" {
+			req.Header.Set("X-Hermes-Session-Token", cfg.HermesTuiSessionToken)
+			req.Header.Set("Authorization", "Bearer "+cfg.HermesTuiSessionToken)
+		}
+	}
+
+	// BUG "iframe menampilkan SalesFlow": dashboard yang gated membalas
+	// 302 ke "/auth/login" (root-relative). Di dalam iframe ber-origin
+	// SalesFlow, "/auth/login" diresolusi ke SalesFlow — SPA fallback
+	// menyajikan aplikasi ini sendiri, bukan halaman login Hermes. Perbaikan:
+	// beri prefix TUIBasePath pada Location root-relative apa pun, sehingga
+	// setiap redirect tetap berada di dalam jalur proxy (halaman login Hermes
+	// yang tampil, bukan SalesFlow). Dashboard yang menghormati
+	// X-Forwarded-Prefix sudah memberi prefix; ini jaring pengaman untuk
+	// redirect auth yang kerap melewatinya.
+	proxy.ModifyResponse = func(resp *http.Response) error {
+		if loc := resp.Header.Get("Location"); loc != "" {
+			resp.Header.Set("Location", prefixTuiLocation(loc, hermestui.TUIBasePath))
+		}
+		return nil
 	}
 
 	return &HermesTuiHandler{
@@ -305,4 +334,22 @@ func (h *HermesTuiHandler) RunSweeper(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// prefixTuiLocation memberi prefix TUIBasePath pada Location redirect yang
+// root-relative sehingga tetap berada di dalam jalur proxy dashboard. Absolut
+// (punya skema/host), fragmen kosong, dan yang sudah berprefix dibiarkan.
+// Inti perbaikan "iframe menampilkan SalesFlow": tanpa ini, redirect dashboard
+// ke "/auth/login" diresolusi browser terhadap origin SalesFlow.
+func prefixTuiLocation(loc, base string) string {
+	if loc == "" || !strings.HasPrefix(loc, "/") {
+		return loc // kosong, atau absolut (http://…) — jangan diutak-atik
+	}
+	if strings.HasPrefix(loc, "//") {
+		return loc // protocol-relative (//host/…) juga absolut
+	}
+	if loc == base || strings.HasPrefix(loc, base+"/") {
+		return loc // sudah berprefix
+	}
+	return base + loc
 }
