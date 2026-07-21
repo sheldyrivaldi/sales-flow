@@ -99,6 +99,7 @@ func NewHermesTuiHandler(repo domain.HermesTuiSessionRepository, cfg *config.Con
 	// redirect auth yang kerap melewatinya.
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		if loc := resp.Header.Get("Location"); loc != "" {
+			loc = redirectAwayFromBrokenOAuthLogin(loc)
 			resp.Header.Set("Location", prefixTuiLocation(loc, hermestui.TUIBasePath))
 		}
 
@@ -384,6 +385,32 @@ func prefixTuiLocation(loc, base string) string {
 		return loc // sudah berprefix
 	}
 	return base + loc
+}
+
+// redirectAwayFromBrokenOAuthLogin menambal BUG VENDOR nyata di hermes-agent
+// (bukan soal prefix): "/" selalu 302 ke "/auth/login?provider=basic", tapi
+// route itu cuma dibuat buat provider OAuth (start_login/redirect_uri) —
+// untuk provider basic ini SELALU crash 500 (lihat traceback di
+// hermes_cli/dashboard_auth/routes.py:197 — "BasicAuthProvider is
+// password-only; there is no OAuth redirect flow. The login page POSTs to
+// /auth/password-login instead."). Ini kejadian ke SIAPA PUN yang buka
+// hermes.moonlay.com/ dari root, bukan cuma lewat proxy kita — sudah
+// dikonfirmasi via curl langsung + docker logs di server Hermes. Selama
+// belum ada fix/upgrade upstream, alihkan redirect yang salah itu ke
+// "/login" (halaman form password statis yang sudah benar — lihat
+// rewriteHermesLoginHTML), pertahankan query "next".
+func redirectAwayFromBrokenOAuthLogin(loc string) string {
+	u, err := url.Parse(loc)
+	if err != nil || u.Path != "/auth/login" || u.Query().Get("provider") != "basic" {
+		return loc
+	}
+	q := url.Values{}
+	if next := u.Query().Get("next"); next != "" {
+		q.Set("next", next)
+	}
+	u.Path = "/login"
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // rewriteHermesLoginHTML menambal 3 literal root-relative absolut yang
