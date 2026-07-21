@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -97,6 +100,35 @@ func NewHermesTuiHandler(repo domain.HermesTuiSessionRepository, cfg *config.Con
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		if loc := resp.Header.Get("Location"); loc != "" {
 			resp.Header.Set("Location", prefixTuiLocation(loc, hermestui.TUIBasePath))
+		}
+
+		// BUG "login basic-auth balik ke dashboard SalesFlow": halaman statis
+		// GET /login yang dipakai provider=basic (beda dari SPA lain di
+		// dashboard — sudah dikonfirmasi via curl langsung dengan
+		// X-Forwarded-Prefix bahwa redirect "/" -> "/auth/login" SUDAH
+		// diprefix dengan benar oleh upstream) TIDAK menghormati
+		// X-Forwarded-Prefix sama sekali: hidden input next="/",
+		// fetch('/auth/password-login'), dan window.location.assign(next
+		// || '/') semuanya root-relative absolut. Di dalam proxy kita
+		// (origin selalu salesflow.moonlay.com), itu bikin submit gagal
+		// nyampe Go (jatuh ke SPA fallback nginx) lalu window.location
+		// balik ke root -> render dashboard SalesFlow sendiri, bukan
+		// Hermes. Vendor bug (nousresearch/hermes-agent v2026.7.7.2),
+		// bukan sesuatu yang bisa kita ubah di sumbernya — rewrite body di
+		// sini sebagai jaring pengaman, sama prinsipnya dengan
+		// prefixTuiLocation di atas untuk Location header. Re-cek kalau
+		// image di-bump: fix upstream mungkin bikin blok ini jadi no-op
+		// (aman) atau perlu disesuaikan lagi kalau markup-nya berubah.
+		if strings.HasPrefix(resp.Header.Get("Content-Type"), "text/html") {
+			body, err := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if err != nil {
+				return fmt.Errorf("hermes tui: baca body login utk rewrite prefix: %w", err)
+			}
+			rewritten := rewriteHermesLoginHTML(body, hermestui.TUIBasePath)
+			resp.Body = io.NopCloser(bytes.NewReader(rewritten))
+			resp.ContentLength = int64(len(rewritten))
+			resp.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
 		}
 		return nil
 	}
@@ -352,4 +384,22 @@ func prefixTuiLocation(loc, base string) string {
 		return loc // sudah berprefix
 	}
 	return base + loc
+}
+
+// rewriteHermesLoginHTML menambal 3 literal root-relative absolut yang
+// diketahui hardcoded di halaman statis GET /login (provider=basic) milik
+// hermes-agent — lihat komentar di ModifyResponse untuk detail bug &
+// justifikasi. Idempotent: kalau literalnya sudah tidak match (markup
+// berubah / fix upstream), fungsi ini no-op dan HTML lewat apa adanya.
+func rewriteHermesLoginHTML(body []byte, base string) []byte {
+	replacements := [][2]string{
+		{`name="next" value="/">`, `name="next" value="` + base + `/">`},
+		{`fetch('/auth/password-login'`, `fetch('` + base + `/auth/password-login'`},
+		{`(data && data.next) || '/')`, `(data && data.next) || '` + base + `/')`},
+	}
+	out := body
+	for _, r := range replacements {
+		out = bytes.ReplaceAll(out, []byte(r[0]), []byte(r[1]))
+	}
+	return out
 }
