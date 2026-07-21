@@ -61,6 +61,17 @@ func NewHermesTuiHandler(repo domain.HermesTuiSessionRepository, cfg *config.Con
 	baseDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		baseDirector(req)
+		// BUG "balik ke SalesFlow via redirect absolut": NewSingleHostReverseProxy
+		// TIDAK mengganti Host header — request ke hermes tetap bawa
+		// Host: salesflow.moonlay.com (host publik browser). Kalau hermes
+		// membangun URL absolut dari Host header itu (redirect kanonik,
+		// dsb — lihat host_header_middleware di traceback-nya), hasilnya
+		// "https://salesflow.moonlay.com/..." — URL ABSOLUT, jadi lolos dari
+		// prefixTuiLocation (yang cuma menangani path root-relative) dan
+		// benar-benar membawa browser keluar ke situs SalesFlow asli.
+		// Set Host ke host target (hermes) supaya hermes selalu melihat
+		// dirinya sendiri dengan benar, apa pun yang dia bangun dari situ.
+		req.Host = target.Host
 		// The dashboard has no ttyd-style base-path flag — it always serves
 		// its own routes rooted at "/" and expects X-Forwarded-Prefix to
 		// know what prefix the browser sees it mounted under (see
