@@ -33,7 +33,19 @@ describe('buildInvite', () => {
     expect(body).toContain('Indo Security Expo 2026')
     expect(body).toContain('JCC Jakarta')
     expect(body).toContain('Dyandra')
-    expect(body).toContain('Mohon konfirmasi kehadiran')
+    expect(body).toMatch(/konfirmasi kehadiran/i)
+  })
+
+  it('memakai nada rekan/atasan, bukan vendor yang merendah', () => {
+    const body = buildInvite(makeEvent()).body
+    expect(body).toContain('Halo Rekan-rekan,')
+    expect(body).not.toContain('Hormat kami')
+    expect(body).not.toContain('perkenankan')
+  })
+
+  it('tidak memakai tanda hubung sebagai penanda daftar (tell AI)', () => {
+    const body = buildInvite(makeEvent({ notes: 'Bawa kartu nama.' })).body
+    expect(body).not.toMatch(/(^|\n)\s*-\s/)
   })
 
   it('menyertakan seluruh penerima', () => {
@@ -42,18 +54,35 @@ describe('buildInvite', () => {
 
   it('tidak menampilkan baris tanggal saat event belum bertanggal', () => {
     const body = buildInvite(makeEvent({ date: null })).body
-    expect(body).not.toContain('- Tanggal :')
+    expect(body).not.toContain('Hari/Tanggal')
     expect(buildInvite(makeEvent({ date: null })).subject).toBe('Undangan: Indo Security Expo 2026')
   })
 
   it('menyisipkan catatan tim bila ada', () => {
     const body = buildInvite(makeEvent({ notes: 'Bawa kartu nama.' })).body
-    expect(body).toContain('Catatan:')
+    expect(body).toContain('CATATAN')
     expect(body).toContain('Bawa kartu nama.')
   })
 
-  it('memakai nama pengirim bila diberikan', () => {
-    expect(buildInvite(makeEvent(), 'Sheldy').body.trimEnd().endsWith('Sheldy')).toBe(true)
+  it('memakai nama pengirim dan perusahaan pada tanda tangan', () => {
+    const body = buildInvite(makeEvent(), { senderName: 'Sheldy', companyName: 'PT Moonlay Technologies' }).body
+    const tail = body.trimEnd()
+    expect(tail.endsWith('PT Moonlay Technologies')).toBe(true)
+    expect(tail).toContain('Sheldy')
+  })
+
+  it('menyertakan lampiran sebagai daftar bernomor + tautan unduh absolut', () => {
+    const body = buildInvite(makeEvent(), {
+      baseUrl: 'https://app.contoh.com',
+      attachments: [
+        { name: 'Rundown.pdf', url: '/uploads/event/abc.pdf' },
+        { name: 'Denah.png', url: '/uploads/event/def.png' },
+      ],
+    }).body
+    expect(body).toContain('MATERI PENDUKUNG')
+    expect(body).toContain('1. Rundown.pdf')
+    expect(body).toContain('https://app.contoh.com/uploads/event/abc.pdf')
+    expect(body).toContain('2. Denah.png')
   })
 })
 

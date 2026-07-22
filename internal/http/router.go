@@ -18,6 +18,7 @@ import (
 	"salespilot/internal/hermestui"
 	"salespilot/internal/http/handlers"
 	applog "salespilot/internal/log"
+	"salespilot/internal/mailer"
 	"salespilot/internal/mcp"
 	"salespilot/internal/repository"
 	"salespilot/internal/service"
@@ -144,13 +145,58 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	eventSvc := service.NewEventService(eventRepo, prospectRepo)
 	eventH := handlers.NewEventHandler(eventSvc, cfg.UploadDir)
 
+	// Undangan event terjadwal (kirim dari server, bukan mailto). Mailer nil
+	// bila SMTP belum dikonfigurasi — penjadwalan tetap jalan, pengiriman
+	// ditandai gagal dengan pesan jelas (prinsip non-blocking). Scheduler
+	// menyapu undangan jatuh tempo tiap menit; dijalankan dengan
+	// context.Background() seperti reaper playbook (umur = proses).
+	eventInviteRepo := repository.NewEventInviteRepo(db)
+	var inviteMailer mailer.Mailer
+	if cfg.SMTPConfigured() {
+		inviteMailer = &mailer.SMTPMailer{
+			Host:         cfg.SMTPHost,
+			Port:         cfg.SMTPPort,
+			Username:     cfg.SMTPUsername,
+			Password:     cfg.SMTPPassword,
+			EnvelopeFrom: cfg.SMTPFrom,
+		}
+	} else {
+		log.Printf("event invite: SMTP belum dikonfigurasi (SMTP_HOST/SMTP_FROM), pengiriman undangan dinonaktifkan")
+	}
+	inviteLoc, lerr := time.LoadLocation(cfg.InviteTimezone)
+	if lerr != nil {
+		log.Printf("event invite: INVITE_TIMEZONE=%q tidak valid, pakai waktu lokal server: %v", cfg.InviteTimezone, lerr)
+		inviteLoc = time.Local
+	}
+	eventInviteSvc := service.NewEventInviteService(eventInviteRepo, eventSvc, inviteMailer, inviteLoc)
+	eventInviteH := handlers.NewEventInviteHandler(eventInviteSvc, userRepo)
+	// Penjadwalan kirim-dari-server DITAHAN untuk sekarang: UI memakai mailto
+	// (buka aplikasi email user). Scheduler hanya dijalankan bila SMTP benar
+	// dikonfigurasi — jadi saat fitur ditahan, tak ada ticker menganggur.
+	// Endpoint /invites tetap terdaftar (dormant) agar mudah dihidupkan lagi.
+	if cfg.SMTPConfigured() {
+		go eventInviteSvc.RunScheduler(context.Background())
+	}
+
 	projectRepo := repository.NewProjectRepo(db)
 	projectSvc := service.NewProjectService(projectRepo)
 	projectH := handlers.NewProjectHandler(projectSvc)
+	// Jembatan tender WON → Proyek Berjalan: tender yang menang otomatis
+	// membuat baris project. Diwire di sini karena projectSvc dibangun setelah
+	// tenderSvc (pola setter opsional, sama seperti SetEmitter di atas).
+	tenderSvc.SetProjectCreator(projectSvc)
 
 	feedbackRepo := repository.NewFeedbackRepo(db)
 	feedbackSvc := service.NewFeedbackService(feedbackRepo)
 	feedbackH := handlers.NewFeedbackHandler(feedbackSvc)
+
+	// Feedback Client dinamis (form builder ala Google Form + bantuan AI) —
+	// menggantikan form kaku 0023 sebagai jalur utama; yang lama dibiarkan
+	// dorman (routes /feedback di bawah) demi kompatibilitas link lama.
+	feedbackFormRepo := repository.NewFeedbackFormRepo(db)
+	feedbackFormSvc := service.NewFeedbackFormService(feedbackFormRepo)
+	feedbackAISvc := service.NewFeedbackAIService(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
+	feedbackFormH := handlers.NewFeedbackFormHandler(feedbackFormSvc, feedbackAISvc, userRepo)
 
 	prospectSvc := service.NewProspectService(prospectRepo, outcomeRepo, learningHook)
 	prospectSvc.SetEmitter(emitter)
@@ -206,11 +252,13 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	if r, ok := hc.(hermes.AgentTaskRunner); ok {
 		agentRunner = r
 	}
-	playbookJobSvc := service.NewPlaybookJobService(playbookJobRepo, agentRunner, profileSvc, eventSvc, cfg.InternalAPIBaseURL, cfg.CronTriggerSecret)
+	// attachmentReader dibagi ke playbook (lampiran event → dokumen konteks) dan
+	// Analisa AI, keduanya membaca berkas event dari UploadDir yang sama.
+	attachmentReader := handlers.NewEventAttachmentReader(cfg.UploadDir)
+	playbookJobSvc := service.NewPlaybookJobService(playbookJobRepo, agentRunner, profileSvc, eventSvc, attachmentReader, cfg.InternalAPIBaseURL, cfg.CronTriggerSecret)
 
 	// Analisa AI memakai jalur titip-tugas yang SAMA dengan playbook, jadi ia
 	// butuh AgentTaskRunner (bukan Client biasa) agar bisa fire-and-forget.
-	attachmentReader := handlers.NewEventAttachmentReader(cfg.UploadDir)
 	eventAnalysisSvc := service.NewEventAnalysisService(eventSvc, profileSvc, agentRunner, attachmentReader, cfg.InternalAPIBaseURL, cfg.CronTriggerSecret)
 	eventAnalysisH := handlers.NewEventAnalysisHandler(eventAnalysisSvc)
 	playbookJobH := handlers.NewPlaybookJobHandler(playbookJobSvc, cfg.UploadDir)
@@ -307,6 +355,10 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	// Public feedback pasca-proyek (link dibagikan ke client, tanpa login).
 	api.GET("/public/feedback/:token", feedbackH.PublicInfo)
 	api.POST("/public/feedback/:token", feedbackH.PublicSubmit)
+
+	// Form feedback dinamis publik (/form/:slug di FE) — tanpa login.
+	api.GET("/public/forms/:slug", feedbackFormH.PublicInfo)
+	api.POST("/public/forms/:slug", feedbackFormH.PublicSubmit)
 
 	// Protected routes — require valid JWT.
 	authd := api.Group("", auth.JWTMiddleware(cfg.JWTSecret))
@@ -408,6 +460,23 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	feedback.GET("/analytics", feedbackH.Analytics)
 	feedback.DELETE("/:id", feedbackH.Delete)
 
+	// Feedback Client dinamis (menu Feedback Client + Analisa Feedback).
+	// Rute statis ("/analytics", "/ai/*") didaftarkan sebelum "/:id" agar tidak
+	// tertangkap sebagai parameter route.
+	feedbackForms := authd.Group("/feedback-forms", auth.RequireCapability(auth.CapCRUDData))
+	feedbackForms.GET("", feedbackFormH.List)
+	feedbackForms.POST("", feedbackFormH.Create)
+	feedbackForms.GET("/analytics", feedbackFormH.AnalyticsGlobal)
+	feedbackForms.POST("/ai/suggest", feedbackFormH.AISuggest)
+	feedbackForms.POST("/ai/refine", feedbackFormH.AIRefine)
+	feedbackForms.POST("/ai/analyze", feedbackFormH.AIAnalyze)
+	feedbackForms.GET("/:id", feedbackFormH.Get)
+	feedbackForms.PUT("/:id", feedbackFormH.Update)
+	feedbackForms.DELETE("/:id", feedbackFormH.Delete)
+	feedbackForms.POST("/:id/publish", feedbackFormH.Publish)
+	feedbackForms.GET("/:id/submissions", feedbackFormH.Submissions)
+	feedbackForms.GET("/:id/analytics", feedbackFormH.Analytics)
+
 	events := authd.Group("/events", auth.RequireCapability(auth.CapCRUDData))
 	events.GET("", eventH.List)
 	events.POST("", eventH.Create)
@@ -419,6 +488,10 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	events.POST("/:id/analyze", eventAnalysisH.Analyze)
 	// Generate playbook terstandarisasi dari konteks event (async job).
 	events.POST("/:id/playbook-job", playbookJobH.CreateFromEvent)
+	// Undangan event terjadwal (kirim dari server ke daftar peserta).
+	events.GET("/:id/invites", eventInviteH.List)
+	events.POST("/:id/invites", eventInviteH.Schedule)
+	events.DELETE("/:id/invites/:inviteId", eventInviteH.Cancel)
 
 	// Prospects — semua role yang punya CapCRUDData.
 	prospects := authd.Group("/prospects", auth.RequireCapability(auth.CapCRUDData))

@@ -21,11 +21,14 @@ type wireResponsesReq struct {
 	// relying on prompt text alone.
 	DocumentBase64   string `json:"document_base64,omitempty"`
 	DocumentFilename string `json:"document_filename,omitempty"`
+	// Documents: BANYAK lampiran sekaligus (bentuk jamak). Bridge merender tiap
+	// dokumen ke gambar per halaman dan menggabung semuanya jadi satu pesan.
+	Documents []wireDocument `json:"documents,omitempty"`
 }
 
 type wireRespFormat struct {
-	Type       string          `json:"type"`
-	JSONSchema wireJSONSchema  `json:"json_schema"`
+	Type       string         `json:"type"`
+	JSONSchema wireJSONSchema `json:"json_schema"`
 }
 
 type wireJSONSchema struct {
@@ -74,7 +77,7 @@ func looksLikeProviderError(s string) bool {
 // filename/fileBytes kosong berarti tidak ada dokumen terlampir (prompt teks
 // biasa); non-kosong mengirim dokumen sebagai base64 untuk dibaca via vision
 // oleh bridge (lihat GenerateJSONFromDocument).
-func (c *httpClient) doResponses(ctx context.Context, prompt string, schema any, sk SessionKey, filename string, fileBytes []byte) (json.RawMessage, error) {
+func (c *httpClient) doResponses(ctx context.Context, prompt string, schema any, sk SessionKey, docs []AgentDocument) (json.RawMessage, error) {
 	wireReq := wireResponsesReq{
 		Prompt: prompt,
 		ResponseFormat: wireRespFormat{
@@ -82,9 +85,14 @@ func (c *httpClient) doResponses(ctx context.Context, prompt string, schema any,
 			JSONSchema: wireJSONSchema{Schema: schema},
 		},
 	}
-	if len(fileBytes) > 0 {
-		wireReq.DocumentBase64 = base64.StdEncoding.EncodeToString(fileBytes)
-		wireReq.DocumentFilename = filename
+	for _, d := range docs {
+		if len(d.Bytes) == 0 {
+			continue
+		}
+		wireReq.Documents = append(wireReq.Documents, wireDocument{
+			Base64:   base64.StdEncoding.EncodeToString(d.Bytes),
+			Filename: d.Filename,
+		})
 	}
 
 	payload, err := json.Marshal(wireReq)
@@ -151,7 +159,7 @@ func isTransientProviderErr(err error) bool {
 // Membungkus generateJSONAttempt dengan retry berjenjang khusus kegagalan
 // koneksi provider yang sementara — tiap attempt punya backoff dan sadar
 // pembatalan context (deadline job).
-func (c *httpClient) generateJSON(ctx context.Context, prompt string, schema any, sk SessionKey, filename string, fileBytes []byte) (json.RawMessage, error) {
+func (c *httpClient) generateJSON(ctx context.Context, prompt string, schema any, sk SessionKey, docs []AgentDocument) (json.RawMessage, error) {
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -163,7 +171,7 @@ func (c *httpClient) generateJSON(ctx context.Context, prompt string, schema any
 			case <-time.After(time.Duration(attempt) * 3 * time.Second):
 			}
 		}
-		raw, err := c.generateJSONAttempt(ctx, prompt, schema, sk, filename, fileBytes)
+		raw, err := c.generateJSONAttempt(ctx, prompt, schema, sk, docs)
 		if err == nil {
 			return raw, nil
 		}
@@ -177,8 +185,8 @@ func (c *httpClient) generateJSON(ctx context.Context, prompt string, schema any
 
 // generateJSONAttempt melakukan satu kali generate: panggil /v1/responses,
 // retry 1x dengan instruksi eksplisit bila output pertama bukan JSON valid.
-func (c *httpClient) generateJSONAttempt(ctx context.Context, prompt string, schema any, sk SessionKey, filename string, fileBytes []byte) (json.RawMessage, error) {
-	raw, err := c.doResponses(ctx, prompt, schema, sk, filename, fileBytes)
+func (c *httpClient) generateJSONAttempt(ctx context.Context, prompt string, schema any, sk SessionKey, docs []AgentDocument) (json.RawMessage, error) {
+	raw, err := c.doResponses(ctx, prompt, schema, sk, docs)
 	if err != nil {
 		return nil, err
 	}
@@ -194,7 +202,7 @@ func (c *httpClient) generateJSONAttempt(ctx context.Context, prompt string, sch
 
 	// Retry 1x dengan instruksi eksplisit JSON-only.
 	retryPrompt := prompt + "\n\nPENTING: Balas HANYA JSON valid yang cocok dengan schema. Tanpa penjelasan, tanpa markdown, tanpa code fence."
-	raw2, err2 := c.doResponses(ctx, retryPrompt, schema, sk, filename, fileBytes)
+	raw2, err2 := c.doResponses(ctx, retryPrompt, schema, sk, docs)
 	if err2 != nil {
 		return nil, fmt.Errorf("hermes generate: retry gagal: %w", err2)
 	}
@@ -212,7 +220,7 @@ func (c *httpClient) generateJSONAttempt(ctx context.Context, prompt string, sch
 // Bila schema == nil, kembalikan raw tanpa validasi.
 // Bila output pertama bukan JSON valid, retry 1x dengan instruksi eksplisit.
 func (c *httpClient) GenerateJSON(ctx context.Context, prompt string, schema any, sk SessionKey) (json.RawMessage, error) {
-	return c.generateJSON(ctx, prompt, schema, sk, "", nil)
+	return c.generateJSON(ctx, prompt, schema, sk, nil)
 }
 
 // GenerateJSONFromDocument is like GenerateJSON but attaches fileBytes (a
@@ -220,5 +228,13 @@ func (c *httpClient) GenerateJSON(ctx context.Context, prompt string, schema any
 // them to the model as native vision input (EP-13), so extraction quality
 // doesn't depend on a lossy local text-extraction pass first.
 func (c *httpClient) GenerateJSONFromDocument(ctx context.Context, prompt, filename string, fileBytes []byte, schema any, sk SessionKey) (json.RawMessage, error) {
-	return c.generateJSON(ctx, prompt, schema, sk, filename, fileBytes)
+	return c.generateJSON(ctx, prompt, schema, sk, []AgentDocument{{Filename: filename, Bytes: fileBytes}})
+}
+
+// GenerateJSONFromDocuments is like GenerateJSONFromDocument but attaches
+// MANY documents at once (each rendered to page images by the bridge and
+// concatenated) — used when the caller gathers several context files (mis.
+// menyusun kuesioner feedback dari beberapa lampiran).
+func (c *httpClient) GenerateJSONFromDocuments(ctx context.Context, prompt string, docs []AgentDocument, schema any, sk SessionKey) (json.RawMessage, error) {
+	return c.generateJSON(ctx, prompt, schema, sk, docs)
 }

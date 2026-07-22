@@ -1,3 +1,4 @@
+import base64
 import json
 from unittest.mock import MagicMock, patch
 
@@ -145,8 +146,23 @@ def test_responses_without_document_sends_plain_string():
     assert captured["content"] == "test tanpa dokumen"
 
 
-def test_responses_invalid_document_base64_returns_400():
-    with patch("app.routes.responses.build_agent", return_value=_fake_agent('{"ok": true}')):
+def test_responses_invalid_document_falls_back_to_prompt_only():
+    """A bad attachment (undecodable / not a real PDF or image) must NOT sink
+    the request — it is skipped and generation proceeds prompt-only, so
+    melampirkan berkas rusak tak pernah lebih buruk dari tanpa berkas."""
+    captured: dict = {}
+
+    def fake_build(**kwargs):
+        agent = MagicMock()
+
+        def fake_run(content, **_):
+            captured["content"] = content
+            return {"final_response": '{"ok": true}'}
+
+        agent.run_conversation.side_effect = fake_run
+        return agent
+
+    with patch("app.routes.responses.build_agent", side_effect=fake_build):
         from app.main import app
         client = TestClient(app)
         r = client.post(
@@ -158,4 +174,45 @@ def test_responses_invalid_document_base64_returns_400():
             },
             headers=HEADERS,
         )
-    assert r.status_code == 400
+    assert r.status_code == 200
+    # Lampiran gagal → jatuh ke prompt-only (string), bukan list multimodal.
+    assert captured["content"] == "test"
+
+
+def test_responses_image_attachment_passed_through_directly():
+    """An image attachment (PNG magic bytes) is embedded as an image_url
+    data-URL directly — images can't be opened by pdfium, so they must NOT be
+    routed through the PDF renderer."""
+    captured: dict = {}
+    png_bytes = b"\x89PNG\r\n\x1a\n" + b"rest-of-png"
+    png_b64 = base64.b64encode(png_bytes).decode("ascii")
+
+    def fake_build(**kwargs):
+        agent = MagicMock()
+
+        def fake_run(content, **_):
+            captured["content"] = content
+            return {"final_response": '{"ok": true}'}
+
+        agent.run_conversation.side_effect = fake_run
+        return agent
+
+    with patch("app.routes.responses.build_agent", side_effect=fake_build), \
+         patch("app.routes.responses.render_pdf_pages_to_data_urls", side_effect=AssertionError("PDF renderer must not be called for images")):
+        from app.main import app
+        client = TestClient(app)
+        r = client.post(
+            "/v1/responses",
+            json={
+                "prompt": "baca gambar",
+                "response_format": {"type": "json_schema", "json_schema": {"schema": {}}},
+                "documents": [{"base64": png_b64, "filename": "shot.png"}],
+            },
+            headers=HEADERS,
+        )
+    assert r.status_code == 200
+    content = captured["content"]
+    assert isinstance(content, list)
+    assert content[0] == {"type": "text", "text": "baca gambar"}
+    assert content[1]["type"] == "image_url"
+    assert content[1]["image_url"]["url"] == f"data:image/png;base64,{png_b64}"

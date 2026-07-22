@@ -89,9 +89,18 @@ func (h *PlaybookJobHandler) Create(c echo.Context) error {
 }
 
 // CreateFromEvent handles POST /api/events/:id/playbook-job — generate a
-// standardized playbook using the full event context + web research.
+// playbook tied to an event: full event context + web research + ALL event
+// attachments. Multipart, sama seperti menu Playbooks: field "title" & "prompt"
+// opsional + optional extra "file". Generate ulang melepas playbook lama dan
+// menautkan yang baru.
 func (h *PlaybookJobHandler) CreateFromEvent(c echo.Context) error {
-	job, err := h.svc.CreateForEvent(c.Request().Context(), c.Param("id"))
+	title := c.FormValue("title")
+	prompt := c.FormValue("prompt")
+	pdfBytes, filename, url, ferr := h.readPlaybookFile(c)
+	if ferr != nil {
+		return httperr.Write(c, ferr)
+	}
+	job, err := h.svc.CreateForEvent(c.Request().Context(), c.Param("id"), title, prompt, pdfBytes, filename, url)
 	if err != nil {
 		return httperr.Write(c, err)
 	}

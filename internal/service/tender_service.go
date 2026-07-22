@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"gorm.io/gorm"
@@ -74,6 +75,11 @@ type TenderService struct {
 	// (playbook dsb) supaya halaman detail langsung terisi tanpa menunggu
 	// user menekan tombol generate satu-satu.
 	aiWarmup func(tenderID string)
+	// projects (nil-able, set via SetProjectCreator) membuat baris Proyek
+	// Berjalan saat tender di-mark WON — jembatan pra-deal (tender) ke
+	// delivery (project). Nil-safe: bila tak diwire, WON hanya set status
+	// tanpa membuat proyek (mis. beberapa test double).
+	projects *ProjectService
 }
 
 func NewTenderService(repo domain.TenderRepository, outcomes domain.OutcomeRepository, learn LearningHook) *TenderService {
@@ -380,6 +386,12 @@ func (s *TenderService) Review(ctx context.Context, id string, reason string) (*
 // optional, nil-safe, out of the constructor (same pattern as SetEmitter).
 func (s *TenderService) SetAIWarmup(fn func(tenderID string)) { s.aiWarmup = fn }
 
+// SetProjectCreator wires the WON->Proyek Berjalan bridge (a tender that is
+// won auto-creates a project). Optional, nil-safe, out of the constructor —
+// same pattern as SetEmitter/SetAIWarmup, and needed because ProjectService is
+// constructed after TenderService in the wiring graph (router.go).
+func (s *TenderService) SetProjectCreator(p *ProjectService) { s.projects = p }
+
 // SetScore denormalizes a fresh AI scoring result (EP-10) onto the tender
 // row so list/detail views can read fit_score/recommended_action/risk_flags/
 // reasoning_summary without joining prospect_score. Called by ScoreService
@@ -435,5 +447,38 @@ func (s *TenderService) RecordOutcome(ctx context.Context, id string, result dom
 		return nil, fmt.Errorf("tender.RecordOutcome update status: %w", err)
 	}
 
+	// Tender WON → jembatan ke Proyek Berjalan: buat baris project bertaut
+	// (source_type=tender). Best-effort — kegagalan membuat proyek TIDAK
+	// menggagalkan pencatatan outcome yang sudah tersimpan (prinsip
+	// non-blocking, sama seperti learning hook). WON bersifat terminal
+	// (canTransition tak punya target keluar), jadi RecordOutcome hanya sukses
+	// sekali per tender → tak ada risiko proyek ganda.
+	if result == domain.OutcomeWon && s.projects != nil {
+		if err := s.createProjectFromTender(ctx, t); err != nil {
+			log.Printf("tender.RecordOutcome: gagal membuat proyek dari tender %s (WON tetap tercatat): %v", t.ID, err)
+		}
+	}
+
 	return t, nil
+}
+
+// createProjectFromTender memetakan tender yang menang menjadi Proyek Berjalan
+// baru (menu Daftar Proyek). Field intelijen bid (fit_score, risk_flags, dsb.)
+// sengaja tidak dibawa — proyek punya lifecycle sendiri (milestone, progress,
+// kesehatan). Tautan asal disimpan lewat source_type/source_id.
+func (s *TenderService) createProjectFromTender(ctx context.Context, t *domain.Tender) error {
+	sourceType := "tender"
+	p := &domain.Project{
+		Name:          t.Title,
+		ClientName:    t.BuyerName,
+		ContractValue: t.ValueEstimate,
+		Currency:      t.Currency,
+		Status:        domain.ProjectOnTrack,
+		SourceType:    &sourceType,
+		SourceID:      &t.ID,
+	}
+	if _, err := s.projects.Create(ctx, p); err != nil {
+		return fmt.Errorf("createProjectFromTender: %w", err)
+	}
+	return nil
 }

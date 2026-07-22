@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -37,6 +38,21 @@ func (r *PlaybookJobRepo) GetByID(ctx context.Context, id string) (*domain.Playb
 	var j domain.PlaybookJob
 	if err := r.db.WithContext(ctx).First(&j, "id = ?", id).Error; err != nil {
 		return nil, fmt.Errorf("playbookJob.GetByID: %w", err)
+	}
+	return &j, nil
+}
+
+// GetByEventID mengembalikan playbook yang tertaut ke event, atau (nil, nil)
+// bila belum ada. Indeks unik parsial (uq_playbook_job_event) menjamin paling
+// banyak satu baris, jadi First aman.
+func (r *PlaybookJobRepo) GetByEventID(ctx context.Context, eventID string) (*domain.PlaybookJob, error) {
+	var j domain.PlaybookJob
+	err := r.db.WithContext(ctx).First(&j, "event_id = ?", eventID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("playbookJob.GetByEventID: %w", err)
 	}
 	return &j, nil
 }

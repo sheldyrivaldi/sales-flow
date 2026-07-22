@@ -5,13 +5,12 @@ import ComponentsGallery from './dev/ComponentsGallery'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Chat from './pages/Chat'
-import TenderList from './pages/tenders/TenderList'
+import TendersPage from './pages/tenders/TendersPage'
 import TenderDetail from './pages/tenders/TenderDetail'
 import EventList from './pages/events/EventList'
 import EventDetail from './pages/events/EventDetail'
 import ProspectBoard from './pages/prospects/ProspectBoard'
 import Onboarding from './pages/onboarding/Onboarding'
-import DiscoveryInbox from './pages/discovery/DiscoveryInbox'
 import PlaybooksIndex from './pages/playbooks/PlaybooksIndex'
 import ReportsPage from './pages/reports/ReportsPage'
 import UserManagement from './pages/users/UserManagement'
@@ -20,9 +19,11 @@ import SettingsProfile from './pages/settings/SettingsProfile'
 import SettingsAiHermes from './pages/settings/SettingsAiHermes'
 import OngoingSummary from './pages/ongoing/OngoingSummary'
 import OngoingProjects from './pages/ongoing/OngoingProjects'
-import PostFeedback from './pages/postproject/PostFeedback'
-import PostAnalytics from './pages/postproject/PostAnalytics'
+import FeedbackFormsList from './pages/postproject/feedback/FeedbackFormsList'
+import FeedbackFormBuilder from './pages/postproject/feedback/FeedbackFormBuilder'
+import FeedbackFormDetail from './pages/postproject/feedback/FeedbackFormDetail'
 import PublicFeedback from './pages/publicfeedback/PublicFeedback'
+import PublicFeedbackForm from './pages/publicfeedback/PublicFeedbackForm'
 
 export default function AppRoutes() {
   return (
@@ -35,13 +36,16 @@ export default function AppRoutes() {
       <Route path="/onboarding" element={<Onboarding />} />
       {/* Form feedback publik untuk client — tanpa login */}
       <Route path="/f/:token" element={<PublicFeedback />} />
+      <Route path="/form/:slug" element={<PublicFeedbackForm />} />
 
       {/* Halaman utama — dalam shell */}
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
           <Route index element={<Dashboard />} />
-          <Route path="discovery" element={<DiscoveryInbox />} />
-          <Route path="tenders" element={<TenderList />} />
+          {/* /discovery lama (menu "Radar Tender" terpisah) kini menyatu ke
+              /tenders — redirect agar bookmark/link lama tak 404. */}
+          <Route path="discovery" element={<Navigate to="/tenders" replace />} />
+          <Route path="tenders" element={<TendersPage />} />
           <Route path="tenders/:id" element={<TenderDetail />} />
           <Route path="events" element={<EventList />} />
           <Route path="events/:id" element={<EventDetail />} />
@@ -55,8 +59,14 @@ export default function AppRoutes() {
           </Route>
           <Route path="postproject">
             <Route index element={<Navigate to="feedback" replace />} />
-            <Route path="feedback" element={<PostFeedback />} />
-            <Route path="analytics" element={<PostAnalytics />} />
+            <Route path="feedback" element={<FeedbackFormsList />} />
+            <Route path="feedback/new" element={<FeedbackFormBuilder />} />
+            <Route path="feedback/:id" element={<FeedbackFormDetail />} />
+            <Route path="feedback/:id/edit" element={<FeedbackFormBuilder />} />
+            {/* Link lama: hasil kini menyatu di halaman detail. */}
+            <Route path="feedback/:id/results" element={<Navigate to=".." replace relative="path" />} />
+            {/* Analisa Feedback kini bagian dari detail form → redirect ke daftar. */}
+            <Route path="analytics" element={<Navigate to="/postproject/feedback" replace />} />
           </Route>
           <Route path="chat" element={<Chat />} />
           <Route path="users" element={<UserManagement />} />

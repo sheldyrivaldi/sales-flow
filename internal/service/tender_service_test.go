@@ -136,3 +136,84 @@ func TestTenderService_Review_WithoutReason_DoesNotNotifyLearningHook(t *testing
 		t.Errorf("rejectTenderIDs = %v, want none (Watchlist has no reason)", hook.rejectTenderIDs)
 	}
 }
+
+// captureProjectRepo is a minimal domain.ProjectRepository that records every
+// created project — used to assert the WON->Proyek bridge maps fields
+// correctly without a real DB.
+type captureProjectRepo struct {
+	created []domain.Project
+}
+
+func (r *captureProjectRepo) Create(_ context.Context, p *domain.Project) error {
+	if p.ID == "" {
+		p.ID = "proj-generated"
+	}
+	r.created = append(r.created, *p)
+	return nil
+}
+func (r *captureProjectRepo) Update(_ context.Context, _ *domain.Project) error { return nil }
+func (r *captureProjectRepo) Delete(_ context.Context, _ string) error          { return nil }
+func (r *captureProjectRepo) GetByID(_ context.Context, _ string) (*domain.Project, error) {
+	return nil, nil
+}
+func (r *captureProjectRepo) List(_ context.Context, _ domain.ProjectFilter, _, _ int) ([]domain.Project, int64, error) {
+	return nil, 0, nil
+}
+
+func TestTenderService_RecordOutcome_Won_CreatesLinkedProject(t *testing.T) {
+	value := 5_000_000_000.0
+	buyer := "Kementerian PU"
+	repo := &fakeScoreTenderRepo{items: map[string]domain.Tender{
+		"t1": {
+			ID: "t1", Title: "Pembangunan Jembatan", BuyerName: &buyer,
+			ValueEstimate: &value, Currency: "IDR", Status: domain.TenderStatusSubmitted,
+		},
+	}}
+	svc := NewTenderService(repo, &fakeOutcomeRepo{}, NoopLearningHook())
+	projRepo := &captureProjectRepo{}
+	svc.SetProjectCreator(NewProjectService(projRepo))
+
+	if _, err := svc.RecordOutcome(context.Background(), "t1", domain.OutcomeWon, "menang"); err != nil {
+		t.Fatalf("RecordOutcome error: %v", err)
+	}
+
+	if len(projRepo.created) != 1 {
+		t.Fatalf("created projects = %d, want 1", len(projRepo.created))
+	}
+	p := projRepo.created[0]
+	if p.Name != "Pembangunan Jembatan" {
+		t.Errorf("Name = %q, want tender title", p.Name)
+	}
+	if p.ClientName == nil || *p.ClientName != buyer {
+		t.Errorf("ClientName = %v, want %q", p.ClientName, buyer)
+	}
+	if p.ContractValue == nil || *p.ContractValue != value {
+		t.Errorf("ContractValue = %v, want %v", p.ContractValue, value)
+	}
+	if p.SourceType == nil || *p.SourceType != "tender" {
+		t.Errorf("SourceType = %v, want \"tender\"", p.SourceType)
+	}
+	if p.SourceID == nil || *p.SourceID != "t1" {
+		t.Errorf("SourceID = %v, want \"t1\"", p.SourceID)
+	}
+	if p.Status != domain.ProjectOnTrack {
+		t.Errorf("Status = %q, want %q", p.Status, domain.ProjectOnTrack)
+	}
+}
+
+func TestTenderService_RecordOutcome_Lost_CreatesNoProject(t *testing.T) {
+	repo := &fakeScoreTenderRepo{items: map[string]domain.Tender{
+		"t1": {ID: "t1", Title: "Tender A", Status: domain.TenderStatusSubmitted},
+	}}
+	svc := NewTenderService(repo, &fakeOutcomeRepo{}, NoopLearningHook())
+	projRepo := &captureProjectRepo{}
+	svc.SetProjectCreator(NewProjectService(projRepo))
+
+	if _, err := svc.RecordOutcome(context.Background(), "t1", domain.OutcomeLost, "kalah"); err != nil {
+		t.Fatalf("RecordOutcome error: %v", err)
+	}
+
+	if len(projRepo.created) != 0 {
+		t.Errorf("created projects = %d, want 0 (LOST must not create a project)", len(projRepo.created))
+	}
+}

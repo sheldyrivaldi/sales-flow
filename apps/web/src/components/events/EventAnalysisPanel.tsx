@@ -178,14 +178,14 @@ export default function EventAnalysisPanel({
             {analysis.data_gaps?.length > 0 && (
               <div className="rounded-card border border-line bg-surface-subtle p-3">
                 <Sub icon={HelpCircle} title="Yang Belum Bisa Disimpulkan" hint="perlu data tambahan" />
-                <ul className="flex flex-col gap-1 mt-1.5">
-                  {analysis.data_gaps.map((g, i) => (
-                    <li key={i} className="text-caption text-fg-muted flex gap-2">
-                      <span className="text-fg-subtle">–</span>
-                      <span>{g}</span>
-                    </li>
-                  ))}
-                </ul>
+                {/* Tiap butir bisa memuat markdown (mis. **nama file** ditebalkan).
+                    Dirender lewat AnalysisMarkdown sebagai daftar agar tidak tampil
+                    mentah sebagai "**teks**". */}
+                <div className="mt-1.5">
+                  <AnalysisMarkdown>
+                    {analysis.data_gaps.map((g) => `- ${g}`).join('\n')}
+                  </AnalysisMarkdown>
+                </div>
               </div>
             )}
           </>

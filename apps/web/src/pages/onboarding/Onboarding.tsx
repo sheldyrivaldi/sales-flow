@@ -85,7 +85,7 @@ export default function Onboarding() {
     } catch {
       // best-effort — discovery (EP-12) not built yet, never block activation
     }
-    navigate('/discovery')
+    navigate('/tenders')
   }
 
   async function handleGenerateKeywords() {
@@ -133,7 +133,7 @@ export default function Onboarding() {
         // best-effort — discovery (EP-12) not built yet, never block activation
       }
       toast.success('Otak agent berhasil diaktifkan.')
-      navigate('/discovery')
+      navigate('/tenders')
     } catch {
       toast.error('Gagal menyimpan profil, coba lagi.')
     }

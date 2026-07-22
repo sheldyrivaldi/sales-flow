@@ -38,6 +38,15 @@ class ResponseFormat(BaseModel):
     json_schema: dict[str, Any] = Field(default_factory=dict)
 
 
+class DocumentPayload(BaseModel):
+    """Satu lampiran (PDF/gambar). Dipakai agar SATU permintaan bisa membawa
+    BANYAK dokumen sekaligus — batas satu-dokumen sebelumnya murni buatan
+    schema, bukan batas agent-nya."""
+
+    base64: str
+    filename: str = "document.pdf"
+
+
 class ResponsesRequest(BaseModel):
     prompt: str
     response_format: ResponseFormat = Field(default_factory=ResponseFormat)
@@ -47,15 +56,11 @@ class ResponsesRequest(BaseModel):
     # relying on lossy externally-extracted text.
     document_base64: str | None = None
     document_filename: str | None = None
-
-
-class DocumentPayload(BaseModel):
-    """Satu lampiran untuk agent-task. Dipakai agar SATU tugas bisa membawa
-    BANYAK dokumen sekaligus — batas satu-dokumen sebelumnya murni buatan
-    schema ini, bukan batas agent-nya."""
-
-    base64: str
-    filename: str = "document.pdf"
+    # documents: BANYAK lampiran sekaligus (mis. beberapa PDF konteks untuk
+    # menyusun kuesioner feedback). Tiap dokumen dirender ke gambar per halaman
+    # dan digabung jadi satu pesan multimodal. document_base64 tunggal di atas
+    # dipertahankan demi kompatibilitas pemanggil lama.
+    documents: list[DocumentPayload] = Field(default_factory=list)
 
 
 class AgentTaskRequest(BaseModel):

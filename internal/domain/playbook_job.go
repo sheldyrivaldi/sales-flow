@@ -43,8 +43,13 @@ type PlaybookJob struct {
 	// Revisions menyimpan riwayat prompt revisi + lampirannya (bisa dibuka).
 	Revisions []PlaybookRevision `json:"revisions" gorm:"column:revisions;serializer:json;type:jsonb"`
 	Source    string             `json:"source"    gorm:"not null;default:'custom'"`
-	CreatedAt time.Time          `json:"created_at"`
-	UpdatedAt time.Time          `json:"updated_at"`
+	// EventID menautkan playbook ke event asalnya (Source=="event"). SATU event
+	// hanya boleh punya SATU playbook tertaut: generate ulang melepas yang lama
+	// (EventID di-nil-kan) dan menautkan yang baru. nil untuk playbook custom
+	// atau playbook event yang tautannya sudah dilepas.
+	EventID   *string   `json:"event_id,omitempty" gorm:"column:event_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (PlaybookJob) TableName() string { return "playbook_job" }
@@ -53,6 +58,10 @@ type PlaybookJobRepository interface {
 	Create(ctx context.Context, j *PlaybookJob) error
 	Update(ctx context.Context, j *PlaybookJob) error
 	GetByID(ctx context.Context, id string) (*PlaybookJob, error)
+	// GetByEventID mengembalikan playbook yang saat ini tertaut ke sebuah event,
+	// atau (nil, nil) bila belum ada — dipakai untuk melepas tautan lama sebelum
+	// generate ulang.
+	GetByEventID(ctx context.Context, eventID string) (*PlaybookJob, error)
 	List(ctx context.Context) ([]PlaybookJob, error)
 	Delete(ctx context.Context, id string) error
 }

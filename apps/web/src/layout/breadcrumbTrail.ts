@@ -13,6 +13,9 @@ export interface Crumb {
 const staticLabels: Record<string, string> = {
   '/tenders/:id': 'Detail',
   '/events/:id': 'Detail',
+  '/postproject/feedback/new': 'Buat Form',
+  '/postproject/feedback/:id': 'Detail',
+  '/postproject/feedback/:id/edit': 'Edit',
 }
 
 function matchStatic(pathname: string): string | undefined {

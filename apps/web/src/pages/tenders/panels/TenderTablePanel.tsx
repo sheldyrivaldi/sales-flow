@@ -2,28 +2,28 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Plus, FileSearch, Sparkles } from 'lucide-react'
 
-import Table from '../../components/ui/Table'
-import type { Column } from '../../components/ui/Table'
-import Button from '../../components/ui/Button'
-import { StagePill, ActionBadge } from '../../components/ui/Badge'
-import ScoreRing from '../../components/ui/ScoreRing'
-import EmptyState from '../../components/ui/EmptyState'
-import ConfirmDialog from '../../components/ui/ConfirmDialog'
-import Select from '../../components/ui/Select'
-import Input from '../../components/ui/Input'
-import { toast } from '../../lib/toast'
-import { formatRupiahShort, formatTanggal } from '../../lib/format'
-import { cn } from '../../lib/cn'
+import Table from '../../../components/ui/Table'
+import type { Column } from '../../../components/ui/Table'
+import Button from '../../../components/ui/Button'
+import { StagePill, ActionBadge } from '../../../components/ui/Badge'
+import ScoreRing from '../../../components/ui/ScoreRing'
+import EmptyState from '../../../components/ui/EmptyState'
+import ConfirmDialog from '../../../components/ui/ConfirmDialog'
+import Select from '../../../components/ui/Select'
+import Input from '../../../components/ui/Input'
+import { toast } from '../../../lib/toast'
+import { formatRupiahShort, formatTanggal } from '../../../lib/format'
+import { cn } from '../../../lib/cn'
 
 import {
   useTenders,
   useDeleteTender,
   usePromoteTender,
   actionToLabel,
-} from '../../api/tenders'
-import type { Tender, TenderFilters, TenderStatus, TenderApiAction, TenderOrigin } from '../../api/tenders'
-import TenderFormDrawer from './TenderFormDrawer'
-import ProposalDraftDrawer from '../../components/tenders/ProposalDraftDrawer'
+} from '../../../api/tenders'
+import type { Tender, TenderFilters, TenderStatus, TenderApiAction, TenderOrigin } from '../../../api/tenders'
+import TenderFormDrawer from '../TenderFormDrawer'
+import ProposalDraftDrawer from '../../../components/tenders/ProposalDraftDrawer'
 
 function deadlineTone(deadline: string | null): 'normal' | 'warning' | 'danger' {
   if (!deadline) return 'normal'
@@ -34,7 +34,10 @@ function deadlineTone(deadline: string | null): 'normal' | 'warning' | 'danger' 
   return 'normal'
 }
 
-export default function TenderList() {
+/** Panel "Tender Aktif" — tabel pengelolaan tender lintas lifecycle
+ * (IDENTIFIED→…→WON/LOST) dengan filter & aksi CRUD. Tombol "Tender Baru"
+ * hidup di toolbar panel ini karena erat dengan tabelnya. */
+export default function TenderTablePanel() {
   const navigate = useNavigate()
   const [filters, setFilters] = useState<TenderFilters>({ page: 1, page_size: 20 })
   const [page, setPage] = useState(1)
@@ -158,17 +161,9 @@ export default function TenderList() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-h2 font-semibold text-fg">Tenders</h1>
-        <Button leftIcon={<Plus className="w-4 h-4" />} onClick={openCreate}>
-          Tender Baru
-        </Button>
-      </div>
-
-      {/* Filter bar */}
-      <div className="flex flex-wrap gap-3">
+    <div className="flex flex-col gap-6">
+      {/* Toolbar: filter + Tender Baru */}
+      <div className="flex flex-wrap items-center gap-3">
         <Select
           className="w-40"
           value={filters.status ?? ''}
@@ -227,6 +222,10 @@ export default function TenderList() {
             setPage(1)
           }}
         />
+
+        <Button className="ml-auto" leftIcon={<Plus className="w-4 h-4" />} onClick={openCreate}>
+          Tender Baru
+        </Button>
       </div>
 
       {/* Table */}
@@ -244,7 +243,7 @@ export default function TenderList() {
             <EmptyState
               icon={<FileSearch className="w-6 h-6" />}
               title="Belum ada tender"
-              description="Mulai tambahkan tender baru atau jalankan Radar Tender."
+              description="Mulai tambahkan tender baru atau jalankan “Cari Tender dengan AI”."
               action={
                 <Button size="sm" onClick={openCreate}>
                   Tender Baru

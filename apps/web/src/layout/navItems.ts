@@ -35,8 +35,7 @@ export const navItems: NavItem[] = [
   {
     path: '/presales', label: 'Pra-Proyek', icon: Compass,
     children: [
-      { path: '/discovery', label: 'Radar Tender', capability: 'RunDiscovery' },
-      { path: '/tenders',   label: 'Tenders' },
+      { path: '/tenders',   label: 'Radar Tender' },
       { path: '/events',    label: 'Events' },
       { path: '/prospects', label: 'Pipeline' },
       { path: '/playbooks', label: 'Playbooks' },
@@ -52,8 +51,7 @@ export const navItems: NavItem[] = [
   {
     path: '/postproject', label: 'Pasca-Proyek', icon: ClipboardCheck,
     children: [
-      { path: '/postproject/feedback',  label: 'Feedback Client' },
-      { path: '/postproject/analytics', label: 'Analisa Feedback' },
+      { path: '/postproject/feedback', label: 'Feedback Client' },
     ],
   },
   { path: '/chat', label: 'Chat', icon: MessageSquare, badge: 'ai' },

@@ -25,6 +25,9 @@ func (f *fakePlaybookJobRepo) Update(ctx context.Context, j *domain.PlaybookJob)
 func (f *fakePlaybookJobRepo) GetByID(ctx context.Context, id string) (*domain.PlaybookJob, error) {
 	return f.job, nil
 }
+func (f *fakePlaybookJobRepo) GetByEventID(ctx context.Context, eventID string) (*domain.PlaybookJob, error) {
+	return nil, nil
+}
 func (f *fakePlaybookJobRepo) List(ctx context.Context) ([]domain.PlaybookJob, error) {
 	return []domain.PlaybookJob{*f.job}, nil
 }

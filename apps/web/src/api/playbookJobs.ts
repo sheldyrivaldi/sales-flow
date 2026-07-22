@@ -24,6 +24,9 @@ export interface PlaybookJob {
   attachment_url?: string
   revisions?: PlaybookRevision[]
   source: 'custom' | 'event'
+  /** Terisi bila playbook tertaut ke sebuah event (Source==='event'). SATU
+   * event hanya punya SATU playbook tertaut; generate ulang memindah tautan. */
+  event_id?: string
   created_at: string
   updated_at: string
 }
@@ -95,13 +98,30 @@ export function useDeletePlaybookJob() {
   })
 }
 
-/** Trigger generate playbook terstandarisasi dari sebuah event. Mengembalikan
- * job in_progress; UI event memantau via list/status. */
+/** Generate (atau generate ulang) playbook tertaut ke sebuah event. Modalnya
+ * identik dengan menu Playbooks: title & prompt opsional + lampiran tambahan
+ * opsional. SELURUH lampiran event otomatis ikut sebagai konteks (server-side),
+ * dan generate ulang melepas playbook lama lalu menautkan yang baru. */
 export function useCreateEventPlaybookJob() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (eventId: string) =>
-      apiFetch<PlaybookJob>(`/api/events/${eventId}/playbook-job`, { method: 'POST' }),
+    mutationFn: ({
+      eventId,
+      title,
+      prompt,
+      file,
+    }: {
+      eventId: string
+      title?: string
+      prompt?: string
+      file?: File | null
+    }) => {
+      const fd = new FormData()
+      if (title?.trim()) fd.append('title', title.trim())
+      if (prompt?.trim()) fd.append('prompt', prompt.trim())
+      if (file) fd.append('file', file)
+      return apiFetch<PlaybookJob>(`/api/events/${eventId}/playbook-job`, { method: 'POST', body: fd })
+    },
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['playbook-jobs'] }),
   })
 }

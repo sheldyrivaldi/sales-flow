@@ -56,6 +56,10 @@ Pilih layout per slide dari pustaka di bawah sesuai BENTUK ISINYA. Isi hanya fie
 Aturan perancangan:
 - JANGAN memakai urutan layout yang sama untuk setiap topik. Susun alur yang paling meyakinkan untuk topik INI.
 - Variasikan: jangan 3 slide "bullets" berturut-turut. Selingi metrics/comparison/matrix/process/quote.
+- LARANGAN KEMONOTONAN (penyebab keluhan "semua mirip"): dalam satu deck TIDAK BOLEH ada
+  dua slide isi yang memakai layout sama BERUNTUN, dan kuadran ("matrix") maupun timeline
+  masing-masing paling banyak dipakai SEKALI — hanya bila materinya memang menuntut. Jangan
+  jadikan keduanya kerangka default. Targetkan minimal 5 jenis layout berbeda dalam satu deck.
 - Pakai "comparison" bila ada kondisi sekarang vs sesudah; "matrix" untuk segmentasi/prioritisasi;
   "process" untuk metodologi; "people" bila ada organisasi yang harus dimenangkan; "quote" bila ada
   temuan riset atau regulasi yang kuat.
@@ -125,6 +129,11 @@ type PlaybookJobService struct {
 	runner  hermes.AgentTaskRunner
 	profile *ProfileService
 	events  *EventService
+	// docs membaca lampiran event dari disk agar playbook yang di-generate dari
+	// sebuah event otomatis membawa SEMUA berkasnya sebagai konteks (sama seperti
+	// Analisa AI). nil-safe: bila tidak disuntik, generate tetap jalan tanpa
+	// lampiran event.
+	docs AttachmentReader
 
 	// callbackBase + callbackSecret dipakai membangun URL yang di-POST bridge
 	// saat playbook selesai (POST {base}/internal/playbook-jobs/{id}/complete).
@@ -132,8 +141,8 @@ type PlaybookJobService struct {
 	callbackSecret string
 }
 
-func NewPlaybookJobService(repo domain.PlaybookJobRepository, runner hermes.AgentTaskRunner, profile *ProfileService, events *EventService, callbackBase, callbackSecret string) *PlaybookJobService {
-	return &PlaybookJobService{repo: repo, runner: runner, profile: profile, events: events, callbackBase: callbackBase, callbackSecret: callbackSecret}
+func NewPlaybookJobService(repo domain.PlaybookJobRepository, runner hermes.AgentTaskRunner, profile *ProfileService, events *EventService, docs AttachmentReader, callbackBase, callbackSecret string) *PlaybookJobService {
+	return &PlaybookJobService{repo: repo, runner: runner, profile: profile, events: events, docs: docs, callbackBase: callbackBase, callbackSecret: callbackSecret}
 }
 
 func (s *PlaybookJobService) List(ctx context.Context) ([]domain.PlaybookJob, error) {
@@ -214,9 +223,19 @@ func profileContext(agg *domain.ProfileAggregate) string {
 	return b.String()
 }
 
-// dispatch menitipkan instruksi ke Hermes (fire-and-forget). Bila gagal
-// dikirim, job langsung ditandai gagal (agent tak akan pernah dipanggil).
-func (s *PlaybookJobService) dispatch(jobID, instruction, filename string, pdf []byte) {
+// singleDoc membungkus satu berkas menjadi slice AgentDocument (kosong bila
+// tidak ada berkas), agar jalur custom/refine tetap seragam dengan jalur event
+// yang mengirim BANYAK lampiran.
+func singleDoc(filename string, pdf []byte) []hermes.AgentDocument {
+	if len(pdf) == 0 {
+		return nil
+	}
+	return []hermes.AgentDocument{{Filename: filename, Bytes: pdf}}
+}
+
+// dispatch menitipkan instruksi + lampiran ke Hermes (fire-and-forget). Bila
+// gagal dikirim, job langsung ditandai gagal (agent tak akan pernah dipanggil).
+func (s *PlaybookJobService) dispatch(jobID, instruction string, docs []hermes.AgentDocument) {
 	if s.runner == nil {
 		s.markFailed(jobID, "AI agent tidak dikonfigurasi.")
 		return
@@ -228,8 +247,7 @@ func (s *PlaybookJobService) dispatch(jobID, instruction, filename string, pdf [
 		JobID:          jobID,
 		CallbackURL:    fmt.Sprintf("%s/internal/playbook-jobs/%s/complete", strings.TrimRight(s.callbackBase, "/"), jobID),
 		CallbackSecret: s.callbackSecret,
-		Filename:       filename,
-		FileBytes:      pdf,
+		Documents:      docs,
 	}
 	if err := s.runner.RunAgentTask(ctx, task); err != nil {
 		log.Printf("playbook job %s: gagal menitipkan tugas ke AI: %v", jobID, err)
@@ -368,13 +386,22 @@ func (s *PlaybookJobService) CreateCustom(ctx context.Context, title, prompt str
 		return nil, err
 	}
 
-	go s.dispatch(job.ID, customInstruction(userTitle(job), prompt, profile, len(pdfBytes) > 0), filename, pdfBytes)
+	go s.dispatch(job.ID, customInstruction(userTitle(job), prompt, profile, len(pdfBytes) > 0), singleDoc(filename, pdfBytes))
 	return job, nil
 }
 
-// CreateForEvent membuat job playbook terstandarisasi untuk sebuah event —
-// Hermes meriset internet + memakai seluruh konteks event, lalu melapor balik.
-func (s *PlaybookJobService) CreateForEvent(ctx context.Context, eventID string) (*domain.PlaybookJob, error) {
+// CreateForEvent membuat/mengganti playbook yang tertaut ke sebuah event.
+//
+// Perilaku "SATU event = SATU playbook": bila event sudah punya playbook
+// tertaut, tautannya DILEPAS (event_id di-nil-kan, playbook lama tetap ada di
+// menu Playbooks) lalu playbook baru mengambil tautannya — jadi generate ulang
+// dari detail event selalu menghasilkan satu hasil yang aktif.
+//
+// title/prompt opsional (modal-nya identik dengan menu Playbooks): title kosong
+// → dipakai "Playbook Event: {nama}"; prompt kosong → murni konteks event.
+// SELURUH lampiran event otomatis ikut sebagai dokumen konteks, plus satu
+// lampiran tambahan opsional (extraDoc).
+func (s *PlaybookJobService) CreateForEvent(ctx context.Context, eventID, title, prompt string, extraDoc []byte, extraFilename, extraURL string) (*domain.PlaybookJob, error) {
 	if s.events == nil {
 		return nil, httperr.NewBadRequest("NO_EVENTS", "modul event belum dikonfigurasi")
 	}
@@ -384,23 +411,64 @@ func (s *PlaybookJobService) CreateForEvent(ctx context.Context, eventID string)
 	}
 	profile, _ := s.profile.GetCurrent(ctx)
 
-	eventCtx := buildEventContext(ev)
+	// Lepas tautan playbook lama lebih dulu — indeks unik parsial melarang dua
+	// playbook menunjuk event yang sama, jadi ini WAJIB sebelum membuat yang
+	// baru. Playbook lama tidak dihapus, hanya kehilangan tautannya.
+	if prev, perr := s.repo.GetByEventID(ctx, eventID); perr == nil && prev != nil {
+		prev.EventID = nil
+		if uerr := s.repo.Update(ctx, prev); uerr != nil {
+			return nil, uerr
+		}
+	}
+
+	// Kumpulkan lampiran event (semuanya) + lampiran tambahan opsional.
+	var docs []hermes.AgentDocument
+	if s.docs != nil {
+		docs, _, _ = s.docs.ReadEventAttachments(ev)
+	}
+	docs = append(docs, singleDoc(extraFilename, extraDoc)...)
+
+	// Prompt tersimpan = konteks event + arahan tambahan user (bila ada), supaya
+	// Retry bisa merekonstruksi instruksi yang sama.
+	storedPrompt := buildEventContext(ev)
+	if p := strings.TrimSpace(prompt); p != "" {
+		storedPrompt += "\n## Arahan Tambahan dari User\n" + p + "\n"
+	}
+
+	title = strings.TrimSpace(title)
+	userTitled := title != ""
+	if !userTitled {
+		title = "Playbook Event: " + ev.Name
+	}
+
 	job := &domain.PlaybookJob{
-		Title:  "Playbook Event: " + ev.Name,
-		Prompt: eventCtx,
-		Status: domain.PlaybookJobInProgress,
-		Source: "event",
+		Title:      title,
+		UserTitled: userTitled,
+		Prompt:     storedPrompt,
+		Status:     domain.PlaybookJobInProgress,
+		Source:     "event",
+		EventID:    &eventID,
 		// WAJIB non-nil: kolom revisions NOT NULL, dan slice nil ditulis GORM
-		// sebagai NULL sehingga INSERT ditolak. Jalur custom sudah mengisinya;
-		// jalur event sempat terlewat dan membuat generate dari detail event
-		// selalu gagal dengan 500.
+		// sebagai NULL sehingga INSERT ditolak.
 		Revisions: []domain.PlaybookRevision{},
+	}
+	// Lampiran utama untuk ditampilkan di kartu: yang diunggah user, kalau tidak
+	// ada pakai lampiran event pertama.
+	if extraFilename != "" {
+		job.AttachmentName = &extraFilename
+		if extraURL != "" {
+			job.AttachmentURL = &extraURL
+		}
+	} else if len(ev.Attachments) > 0 {
+		name, url := ev.Attachments[0].Name, ev.Attachments[0].URL
+		job.AttachmentName = &name
+		job.AttachmentURL = &url
 	}
 	if err := s.repo.Create(ctx, job); err != nil {
 		return nil, err
 	}
 
-	go s.dispatch(job.ID, eventInstruction(eventCtx, profile), "", nil)
+	go s.dispatch(job.ID, eventInstruction(storedPrompt, profile), docs)
 	return job, nil
 }
 
@@ -423,12 +491,20 @@ func (s *PlaybookJobService) Retry(ctx context.Context, id string) (*domain.Play
 	}
 
 	var instruction string
+	var docs []hermes.AgentDocument
 	if job.Source == "event" {
 		instruction = eventInstruction(job.Prompt, profile)
+		// Muat ulang lampiran event agar retry membawa konteks yang sama seperti
+		// generate pertama (bukan playbook "telanjang").
+		if job.EventID != nil && s.events != nil && s.docs != nil {
+			if ev, gerr := s.events.Get(ctx, *job.EventID); gerr == nil {
+				docs, _, _ = s.docs.ReadEventAttachments(ev)
+			}
+		}
 	} else {
 		instruction = customInstruction(userTitle(job), job.Prompt, profile, false)
 	}
-	go s.dispatch(job.ID, instruction, "", nil)
+	go s.dispatch(job.ID, instruction, docs)
 	return job, nil
 }
 
@@ -473,7 +549,7 @@ func (s *PlaybookJobService) Refine(ctx context.Context, id, instruction string,
 	}
 	b.WriteString(schemaFooter())
 
-	go s.dispatch(job.ID, b.String(), filename, pdfBytes)
+	go s.dispatch(job.ID, b.String(), singleDoc(filename, pdfBytes))
 	return job, nil
 }
 

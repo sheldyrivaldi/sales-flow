@@ -5,9 +5,11 @@ import Card, { CardHeader, CardBody } from '../ui/Card'
 import Button from '../ui/Button'
 import EmailChipsInput from './EmailChipsInput'
 import { toast } from '../../lib/toast'
-import { useUpdateEvent } from '../../api/events'
+import { useUpdateEvent, EVENT_TYPE_LABELS } from '../../api/events'
 import type { Event } from '../../api/events'
+import { useProfile } from '../../api/profile'
 import { buildInvite, mailtoUrl, isMailtoTooLong } from '../../lib/eventInvite'
+import { useAuthStore } from '../../store/auth'
 
 export interface EventParticipantsSectionProps {
   event: Event
@@ -27,6 +29,10 @@ export default function EventParticipantsSection({ event, locked }: EventPartici
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<string[]>(event.participant_emails ?? [])
   const update = useUpdateEvent()
+  // Nama pengundang + perusahaan untuk tanda tangan email — undangan tetap
+  // dikirim DARI akun email user sendiri lewat mailto.
+  const senderName = useAuthStore((s) => s.user?.name)
+  const { data: profile } = useProfile()
 
   const saved = event.participant_emails ?? []
   const dirty = editing && JSON.stringify(draft) !== JSON.stringify(saved)
@@ -46,11 +52,21 @@ export default function EventParticipantsSection({ event, locked }: EventPartici
       toast.error('Belum ada peserta yang diundang.')
       return
     }
-    const invite = buildInvite(event)
+    const invite = buildInvite(event, {
+      senderName,
+      companyName: profile?.company_name,
+      typeLabel: EVENT_TYPE_LABELS[event.type],
+      baseUrl: window.location.origin,
+      // mailto tidak bisa membawa berkas, jadi lampiran event disertakan sebagai
+      // tautan unduh di badan email.
+      attachments: event.attachments ?? [],
+    })
     const url = mailtoUrl(invite)
     if (isMailtoTooLong(url)) {
-      // Sebagian klien memotong mailto yang terlalu panjang tanpa memberi tahu.
-      toast.error('Daftar peserta terlalu panjang untuk dibuka otomatis, salin alamatnya lalu tempel di email.')
+      // Klien email (khususnya Outlook di Windows) memotong mailto yang terlalu
+      // panjang tanpa memberi tahu. Isi undangan formal + tautan bisa melewati
+      // batas itu, jadi kita cegah dan minta user menyalinnya.
+      toast.error('Isi undangan terlalu panjang untuk dibuka otomatis di aplikasi email. Kurangi lampiran atau catatan, lalu coba lagi.')
       return
     }
     window.location.href = url
@@ -130,8 +146,9 @@ export default function EventParticipantsSection({ event, locked }: EventPartici
             </div>
             <p className="inline-flex items-start gap-1.5 text-caption text-fg-subtle">
               <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" aria-hidden="true" />
-              Kirim Undangan membuka draft di aplikasi email kamu (mis. Outlook) dengan subjek, penerima,
-              dan isi yang sudah tersusun — kamu tetap bisa menyuntingnya sebelum mengirim.
+              Kirim Undangan membuka draft undangan formal di aplikasi email kamu (mis. Outlook) dengan
+              subjek, penerima, dan isi lengkap yang sudah tersusun. Lampiran event disertakan sebagai
+              tautan unduh di badan email, karena draft email tidak bisa membawa berkas secara otomatis.
             </p>
           </>
         )}

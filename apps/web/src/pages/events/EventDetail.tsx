@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router'
-import { ArrowLeft, Edit2, CalendarDays, MapPin, Building2, Users, Lock } from 'lucide-react'
+import { Edit2, CalendarDays, MapPin, Building2, Users, Lock } from 'lucide-react'
 
 import Button from '../../components/ui/Button'
 import Skeleton from '../../components/ui/Skeleton'
@@ -94,13 +94,6 @@ export default function EventDetail() {
       {/* Header */}
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
-          <button
-            type="button"
-            onClick={() => navigate('/events')}
-            className="inline-flex items-center gap-1 text-caption text-fg-muted hover:text-primary transition-colors mb-1"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" /> Events
-          </button>
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-h2 font-semibold text-fg">{event.name}</h1>
             <span className={cn('inline-flex items-center px-2 py-0.5 rounded-pill text-caption font-medium', TYPE_COLORS[event.type])}>
@@ -112,7 +105,7 @@ export default function EventDetail() {
           </div>
         </div>
         <Button
-          variant="secondary"
+          variant="primary"
           size="sm"
           disabled={locked}
           title={locked ? 'Terkunci selama analisa berjalan' : undefined}
@@ -131,18 +124,24 @@ export default function EventDetail() {
         <Fact icon={Users} label="Peserta diundang" value={`${event.participant_emails?.length ?? 0} orang`} />
       </div>
 
-      {/* NILAI UTAMA — diletakkan paling atas dengan sengaja. */}
-      <EventAnalysisPanel
-        eventId={event.id}
-        analysis={event.analysis}
-        analyzedAt={event.analyzed_at}
-        status={event.analysis_status}
-        error={event.analysis_error}
-        attachmentCount={event.attachments?.length ?? 0}
-      />
+      {/* NILAI UTAMA — hanya untuk event yang BENAR-BENAR dihadiri. Analisa AI
+          menyimpulkan peluang dari apa yang terjadi di lapangan (booth, kartu
+          nama, sesi); event yang masih direncanakan atau batal belum punya
+          bahan itu, jadi seksinya sengaja tidak dimunculkan. */}
+      {event.status === 'ATTENDED' && (
+        <EventAnalysisPanel
+          eventId={event.id}
+          analysis={event.analysis}
+          analyzedAt={event.analyzed_at}
+          status={event.analysis_status}
+          error={event.analysis_error}
+          attachmentCount={event.attachments?.length ?? 0}
+        />
+      )}
 
-      {/* Playbook event — hasilnya tampil di sini juga, bukan cuma di menu Playbooks. */}
-      <EventPlaybookCard eventId={event.id} eventName={event.name} />
+      {/* Playbook event — tertaut ke event ini: tampil, dibuka, direvisi, dan
+          di-generate ulang langsung di sini. Lampiran event ikut otomatis. */}
+      <EventPlaybookCard eventId={event.id} eventName={event.name} attachments={event.attachments ?? []} />
 
       {/* Lampiran: lihat, tambah, hapus langsung dari sini. */}
       <EventAttachmentsSection eventId={event.id} attachments={event.attachments ?? []} locked={locked} />

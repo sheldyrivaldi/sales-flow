@@ -97,3 +97,11 @@ type Client interface {
 type DocumentExtractor interface {
 	GenerateJSONFromDocument(ctx context.Context, prompt, filename string, fileBytes []byte, schema any, sk SessionKey) (json.RawMessage, error)
 }
+
+// MultiDocumentExtractor is like DocumentExtractor but attaches MANY documents
+// to a single synchronous JSON generation (bridge renders every page of every
+// doc to vision input). Kept optional/out of Client for the same reason as
+// DocumentExtractor: callers type-assert `de, ok := hc.(hermes.MultiDocumentExtractor)`.
+type MultiDocumentExtractor interface {
+	GenerateJSONFromDocuments(ctx context.Context, prompt string, docs []AgentDocument, schema any, sk SessionKey) (json.RawMessage, error)
+}

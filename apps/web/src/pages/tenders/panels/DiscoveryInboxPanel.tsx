@@ -2,25 +2,25 @@ import { useState } from 'react'
 import { Link } from 'react-router'
 import { Sparkles, ChevronRight } from 'lucide-react'
 
-import Button from '../../components/ui/Button'
-import Select from '../../components/ui/Select'
-import Card from '../../components/ui/Card'
-import ScoreRing from '../../components/ui/ScoreRing'
-import { ActionBadge } from '../../components/ui/Badge'
-import { RiskFlagList } from '../../components/ui/RiskFlag'
-import EmptyState from '../../components/ui/EmptyState'
-import Skeleton from '../../components/ui/Skeleton'
-import Modal from '../../components/ui/Modal'
-import Field from '../../components/ui/Field'
-import Textarea from '../../components/ui/Textarea'
+import Button from '../../../components/ui/Button'
+import Select from '../../../components/ui/Select'
+import Card from '../../../components/ui/Card'
+import ScoreRing from '../../../components/ui/ScoreRing'
+import { ActionBadge } from '../../../components/ui/Badge'
+import { RiskFlagList } from '../../../components/ui/RiskFlag'
+import EmptyState from '../../../components/ui/EmptyState'
+import Skeleton from '../../../components/ui/Skeleton'
+import Modal from '../../../components/ui/Modal'
+import Field from '../../../components/ui/Field'
+import Textarea from '../../../components/ui/Textarea'
 
-import { formatRupiahShort, formatTanggal, formatRelative } from '../../lib/format'
-import { cn } from '../../lib/cn'
-import { actionToLabel, usePromoteTender, useReviewTender } from '../../api/tenders'
-import type { Tender, TenderApiAction } from '../../api/tenders'
-import { useDiscoveryInbox, useDiscoveryRuns, useRunDiscovery } from '../../api/discovery'
-import { useProfile, isProfileConfigured } from '../../api/profile'
-import { toast } from '../../lib/toast'
+import { formatRupiahShort, formatTanggal } from '../../../lib/format'
+import { cn } from '../../../lib/cn'
+import { actionToLabel, usePromoteTender, useReviewTender } from '../../../api/tenders'
+import type { Tender, TenderApiAction } from '../../../api/tenders'
+import { useDiscoveryInbox, useDiscoveryRuns } from '../../../api/discovery'
+import { useProfile, isProfileConfigured } from '../../../api/profile'
+import { toast } from '../../../lib/toast'
 
 function deadlineTone(deadline: string | null): 'normal' | 'warning' | 'danger' {
   if (!deadline) return 'normal'
@@ -112,7 +112,12 @@ const MIN_SCORE_OPTIONS = [
   { value: '50', label: '≥ 50 (Watchlist)' },
 ]
 
-export default function DiscoveryInbox() {
+/** Panel "Penemuan AI" — kartu triage tender temuan crawler yang belum
+ * ditinjau (Pursue/Watchlist/Tolak). Self-contained: status run crawling
+ * dibaca lewat useDiscoveryRuns (di-dedupe react-query dengan header
+ * TendersPage), jadi panel ini tak butuh prop dari induk. Tombol "Cari Tender
+ * dengan AI" dipindah ke header TendersPage. */
+export default function DiscoveryInboxPanel() {
   const [recommendedAction, setRecommendedAction] = useState<TenderApiAction | ''>('')
   const [minScore, setMinScore] = useState('')
   const [rejectTarget, setRejectTarget] = useState<Tender | null>(null)
@@ -131,20 +136,8 @@ export default function DiscoveryInbox() {
     min_score: minScore ? Number(minScore) : undefined,
   })
 
-  const runMutation = useRunDiscovery()
   const promoteMutation = usePromoteTender()
   const reviewMutation = useReviewTender()
-
-  async function handleRun() {
-    try {
-      const run = await runMutation.mutateAsync()
-      if (run.status === 'pending' || run.status === 'running') {
-        toast.success('Crawling tender dimulai, hasil masuk otomatis saat selesai.')
-      }
-    } catch (err) {
-      toast.error(err instanceof Error && err.message ? err.message : 'Gagal memulai crawling tender.')
-    }
-  }
 
   async function handlePursue(tender: Tender) {
     setPendingId(tender.id)
@@ -190,32 +183,8 @@ export default function DiscoveryInbox() {
     }
   }
 
-  const statusText = latestRun
-    ? isRunning
-      ? 'Crawling sedang berjalan — bisa memakan beberapa menit, kamu boleh tinggal ke halaman lain.'
-      : `Terakhir: ${formatRelative(latestRun.finished_at ?? latestRun.started_at)} • ${latestRun.found_count} baru`
-    : 'Belum pernah dijalankan'
-
   return (
-    <div className="flex flex-col gap-6 p-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-h2 font-semibold text-fg flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-accent" /> Radar Tender
-          </h1>
-          <p className="text-caption text-fg-muted mt-0.5">{statusText}</p>
-        </div>
-        <Button
-          leftIcon={<Sparkles className="w-4 h-4" />}
-          loading={runMutation.isPending || isRunning}
-          disabled={!profileConfigured || isRunning}
-          onClick={handleRun}
-        >
-          {isRunning ? 'Crawling berjalan…' : 'Jalankan crawling'}
-        </Button>
-      </div>
-
+    <div className="flex flex-col gap-6">
       {/* Filter bar */}
       <div className="flex flex-wrap gap-3">
         <Select
@@ -270,7 +239,7 @@ export default function DiscoveryInbox() {
         <EmptyState
           icon={<Sparkles className="w-6 h-6" />}
           title="Belum ada peluang baru"
-          description="Coba longgarkan kriteria atau tambah sumber pencarian."
+          description="Coba longgarkan kriteria atau tambah sumber pencarian, lalu jalankan “Cari Tender dengan AI”."
         />
       ) : (
         <div className="flex flex-col gap-3">

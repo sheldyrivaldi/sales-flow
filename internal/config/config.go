@@ -58,6 +58,27 @@ type Config struct {
 	// rest of the app works fine (PRD §8 non-blocking principle extended
 	// to configuration, not just AI output).
 	ConfigEncKey string
+
+	// SMTP* mengirim undangan event terjadwal dari server. SEMUA opsional dan
+	// dibaca lewat env yang disetel operator sendiri — aplikasi tidak pernah
+	// menyimpan kredensial ini. Tanpa SMTPHost, fitur kirim-undangan degrade:
+	// penjadwalan tetap tercatat tapi pengiriman ditandai gagal dengan pesan
+	// jelas (mengikuti prinsip non-blocking PRD §8). SMTPFrom adalah alamat
+	// pengirim amplop (akun relay); nama/alamat pengundang tetap dipasang di
+	// header From/Reply-To agar undangan tampak datang dari yang mengundang.
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
+	// InviteTimezone menentukan arti "jam 07:00" pada jadwal non-custom (mis.
+	// "Asia/Jakarta"). Default ke waktu lokal server bila kosong/invalid.
+	InviteTimezone string
+}
+
+// SMTPConfigured melaporkan apakah pengiriman email siap dipakai.
+func (c *Config) SMTPConfigured() bool {
+	return c.SMTPHost != "" && c.SMTPPort != 0 && c.SMTPFrom != ""
 }
 
 // Load reads config from environment (and .env if present). Returns error
@@ -82,6 +103,12 @@ func Load() (*Config, error) {
 		UploadDir:             getEnv("UPLOAD_DIR", "./data/uploads"),
 		ConfigEncKey:          os.Getenv("CONFIG_ENC_KEY"),
 		AutoMigrate:           getEnvBool("AUTO_MIGRATE", true),
+		SMTPHost:              os.Getenv("SMTP_HOST"),
+		SMTPPort:              getEnvInt("SMTP_PORT", 587),
+		SMTPUsername:          os.Getenv("SMTP_USERNAME"),
+		SMTPPassword:          os.Getenv("SMTP_PASSWORD"),
+		SMTPFrom:              os.Getenv("SMTP_FROM"),
+		InviteTimezone:        getEnv("INVITE_TIMEZONE", "Asia/Jakarta"),
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
@@ -121,6 +148,20 @@ func getEnv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// getEnvInt parses an integer env var, falling back to def when unset/invalid.
+func getEnvInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		log.Printf("config: %s=%q invalid, pakai default %d", key, v, def)
+		return def
+	}
+	return n
 }
 
 // getEnvBool parses a boolean env var (strconv.ParseBool: "1"/"0",
