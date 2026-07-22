@@ -19,10 +19,11 @@ type InternalHandler struct {
 	secret        string
 	playbookJobs  *service.PlaybookJobService
 	eventAnalysis *service.EventAnalysisService
+	feedbackForms *service.FeedbackFormService
 }
 
-func NewInternalHandler(scheduler *ai.Scheduler, secret string, playbookJobs *service.PlaybookJobService, eventAnalysis *service.EventAnalysisService) *InternalHandler {
-	return &InternalHandler{scheduler: scheduler, secret: secret, playbookJobs: playbookJobs, eventAnalysis: eventAnalysis}
+func NewInternalHandler(scheduler *ai.Scheduler, secret string, playbookJobs *service.PlaybookJobService, eventAnalysis *service.EventAnalysisService, feedbackForms *service.FeedbackFormService) *InternalHandler {
+	return &InternalHandler{scheduler: scheduler, secret: secret, playbookJobs: playbookJobs, eventAnalysis: eventAnalysis, feedbackForms: feedbackForms}
 }
 
 // checkSecret validates the shared secret from query param or X-Cron-Secret
@@ -83,6 +84,35 @@ func (h *InternalHandler) CompleteEventAnalysis(c echo.Context) error {
 		return c.JSON(http.StatusServiceUnavailable, echo.Map{"error": "analisa event tidak dikonfigurasi"})
 	}
 	if err := h.eventAnalysis.Complete(c.Request().Context(), c.Param("id"), content, body.Error); err != nil {
+		return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
+	}
+	return c.JSON(http.StatusOK, echo.Map{"status": "ok"})
+}
+
+// CompleteFeedbackAISuggest handles POST
+// /internal/feedback-forms/:id/ai-suggest-complete — bridge melapor balik
+// hasil generate saran pertanyaan (pola callback yang SAMA dengan playbook /
+// analisa event). Body: {"content": {...}} bila sukses, {"error": "..."} bila
+// gagal.
+func (h *InternalHandler) CompleteFeedbackAISuggest(c echo.Context) error {
+	if !h.checkSecret(c) {
+		return c.JSON(http.StatusUnauthorized, echo.Map{"error": "unauthorized"})
+	}
+	var body struct {
+		Content json.RawMessage `json:"content"`
+		Error   string          `json:"error"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "body tidak valid"})
+	}
+	content := body.Content
+	if string(content) == "null" {
+		content = nil
+	}
+	if h.feedbackForms == nil {
+		return c.JSON(http.StatusServiceUnavailable, echo.Map{"error": "feedback forms tidak dikonfigurasi"})
+	}
+	if err := h.feedbackForms.CompleteAISuggest(c.Request().Context(), c.Param("id"), content, body.Error); err != nil {
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, echo.Map{"status": "ok"})

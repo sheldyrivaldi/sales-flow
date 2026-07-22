@@ -115,7 +115,16 @@ function RowMenu({ actions }: { actions: KebabAction[] }) {
                 <button
                   role="menuitem"
                   type="button"
-                  onClick={() => { action.onClick(); setOpen(false) }}
+                  onClick={() => {
+                    // try/finally: an action that throws synchronously (e.g.
+                    // an unavailable browser API) must never leave the
+                    // popover stuck open.
+                    try {
+                      action.onClick()
+                    } finally {
+                      setOpen(false)
+                    }
+                  }}
                   className={cn(
                     'w-full text-left px-3 py-2 text-body hover:bg-surface-subtle transition-colors',
                     action.danger ? 'text-danger' : 'text-fg'

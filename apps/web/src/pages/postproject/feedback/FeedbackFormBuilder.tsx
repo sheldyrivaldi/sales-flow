@@ -1,8 +1,15 @@
-import { useRef, useState } from 'react'
+import { useRef, useState, type CSSProperties } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
+import {
+  DndContext, DragOverlay, closestCenter, PointerSensor, useSensor, useSensors,
+  type DragEndEvent, type DragStartEvent,
+} from '@dnd-kit/core'
+import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import {
   ArrowUp, ArrowDown, GripVertical, Trash2, Plus, Sparkles, Hash,
   Type as TypeIcon, ListChecks, Gauge, X, Wand2, Check, Paperclip,
+  Loader2, AlertTriangle, Settings2, RotateCcw,
 } from 'lucide-react'
 
 import Button from '../../../components/ui/Button'
@@ -16,17 +23,20 @@ import Card, { CardBody } from '../../../components/ui/Card'
 import Skeleton from '../../../components/ui/Skeleton'
 import { toast } from '../../../lib/toast'
 import { cn } from '../../../lib/cn'
+import { copyToClipboard } from '../../../lib/clipboard'
 import {
   useFeedbackForm,
   useCreateFeedbackForm,
   useUpdateFeedbackForm,
   usePublishFeedbackForm,
   useSuggestQuestions,
+  useSubmitClarifyAnswers,
+  useClearAIJob,
   useRefineQuestion,
   publicFormLink,
 } from '../../../api/feedbackForms'
 import type {
-  FeedbackForm, FeedbackQuestion, QuestionType, SuggestedQuestion, FormLanguage,
+  FeedbackForm, FeedbackQuestion, QuestionType, SuggestedQuestion, FormLanguage, TypeCountsInput,
 } from '../../../api/feedbackForms'
 
 // Batas lampiran saran AI — selaras dengan cap backend (10 MB per berkas).
@@ -57,7 +67,9 @@ function ratingDefaults(lang: FormLanguage): { min: string; max: string } {
 }
 
 function blankQuestion(type: QuestionType): FeedbackQuestion {
-  const base: FeedbackQuestion = { id: genId(), type, label: '', required: false }
+  // Wajib diisi secara default — user cukup mematikan toggle untuk pertanyaan
+  // yang memang opsional, alih-alih menyalakannya satu per satu.
+  const base: FeedbackQuestion = { id: genId(), type, label: '', required: true }
   if (type === 'rating') base.scale = 5
   if (type === 'choice') { base.options = ['', '']; base.multiple = false }
   return base
@@ -69,7 +81,7 @@ function fromSuggested(s: SuggestedQuestion): FeedbackQuestion {
     type: s.type,
     label: s.label,
     description: s.description,
-    required: false,
+    required: true,
     scale: s.type === 'rating' ? s.scale ?? 5 : undefined,
     options: s.type === 'choice' ? s.options ?? [] : undefined,
     multiple: s.type === 'choice' ? s.multiple ?? false : undefined,
@@ -108,8 +120,9 @@ function BuilderInner({ existing, paramId }: { existing: FeedbackForm | null; pa
   const [slug, setSlug] = useState(existing?.slug ?? '')
   const [language, setLanguage] = useState<FormLanguage>(existing?.language ?? 'id')
   const [questions, setQuestions] = useState<FeedbackQuestion[]>(existing?.questions ?? [])
-  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [activeId, setActiveId] = useState<string | null>(null)
   const [savedId, setSavedId] = useState<string | undefined>(existing?.id ?? paramId)
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
   // --- Question mutators ---
   function updateQuestion(qid: string, patch: Partial<FeedbackQuestion>) {
@@ -131,15 +144,19 @@ function BuilderInner({ existing, paramId }: { existing: FeedbackForm | null; pa
       return next
     })
   }
-  function dropOnto(target: number) {
+  function handleDragStart(e: DragStartEvent) {
+    setActiveId(String(e.active.id))
+  }
+  function handleDragEnd(e: DragEndEvent) {
+    const { active, over } = e
+    setActiveId(null)
+    if (!over || active.id === over.id) return
     setQuestions((qs) => {
-      if (dragIndex === null || dragIndex === target) return qs
-      const next = [...qs]
-      const [moved] = next.splice(dragIndex, 1)
-      next.splice(target, 0, moved)
-      return next
+      const oldIndex = qs.findIndex((q) => q.id === active.id)
+      const newIndex = qs.findIndex((q) => q.id === over.id)
+      if (oldIndex === -1 || newIndex === -1) return qs
+      return arrayMove(qs, oldIndex, newIndex)
     })
-    setDragIndex(null)
   }
 
   const [addOpen, setAddOpen] = useState(false)
@@ -203,7 +220,7 @@ function BuilderInner({ existing, paramId }: { existing: FeedbackForm | null; pa
     try {
       const published = await publishMutation.mutateAsync(savedFormId)
       toast.success('Form diterbitkan.')
-      await navigator.clipboard.writeText(publicFormLink(published.slug)).catch(() => {})
+      await copyToClipboard(publicFormLink(published.slug))
       navigate(`/postproject/feedback/${savedFormId}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Gagal menerbitkan form.')
@@ -242,8 +259,8 @@ function BuilderInner({ existing, paramId }: { existing: FeedbackForm | null; pa
                 <option value="en">English</option>
               </Select>
             </Field>
-            <Field label="Slug link publik" helper={`Link: ${publicFormLink(slug || 'otomatis')}`}>
-              <Input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="Tulis slug link publik" />
+            <Field label="Alamat link publik" helper={`Link: ${publicFormLink(slug || 'otomatis')}`}>
+              <Input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="Tulis alamat singkat untuk link ini" />
             </Field>
           </div>
         </CardBody>
@@ -252,7 +269,13 @@ function BuilderInner({ existing, paramId }: { existing: FeedbackForm | null; pa
       {/* Panel AI */}
       <AIPanel
         defaultOpen={searchParams.get('ai') === '1'}
+        formId={savedId}
         language={language}
+        onFormCreated={(id, derivedTitle) => {
+          setSavedId(id)
+          if (!title.trim()) setTitle(derivedTitle)
+          window.history.replaceState(null, '', `/postproject/feedback/${id}/edit`)
+        }}
         onAdd={(selected) => setQuestions((qs) => [...qs, ...selected.map(fromSuggested)])}
       />
 
@@ -268,23 +291,34 @@ function BuilderInner({ existing, paramId }: { existing: FeedbackForm | null; pa
           </p>
         )}
 
-        {questions.map((q, i) => (
-          <QuestionCard
-            key={q.id}
-            q={q}
-            index={i}
-            total={questions.length}
-            language={language}
-            isDragging={dragIndex === i}
-            onDragStart={() => setDragIndex(i)}
-            onDragEnd={() => setDragIndex(null)}
-            onDropOnto={() => dropOnto(i)}
-            onMoveUp={() => move(i, -1)}
-            onMoveDown={() => move(i, 1)}
-            onChange={(patch) => updateQuestion(q.id, patch)}
-            onRemove={() => removeQuestion(q.id)}
-          />
-        ))}
+        <DndContext
+          sensors={dndSensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragEnd={handleDragEnd}
+          onDragCancel={() => setActiveId(null)}
+        >
+          <SortableContext items={questions.map((q) => q.id)} strategy={verticalListSortingStrategy}>
+            <div className="flex flex-col gap-3">
+              {questions.map((q, i) => (
+                <QuestionCard
+                  key={q.id}
+                  q={q}
+                  index={i}
+                  total={questions.length}
+                  language={language}
+                  onMoveUp={() => move(i, -1)}
+                  onMoveDown={() => move(i, 1)}
+                  onChange={(patch) => updateQuestion(q.id, patch)}
+                  onRemove={() => removeQuestion(q.id)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+          <DragOverlay>
+            {activeId ? <QuestionCardOverlay q={questions.find((q) => q.id === activeId) ?? null} /> : null}
+          </DragOverlay>
+        </DndContext>
 
         {/* Tambah pertanyaan */}
         <div className="relative">
@@ -321,10 +355,6 @@ interface QuestionCardProps {
   index: number
   total: number
   language: FormLanguage
-  isDragging: boolean
-  onDragStart: () => void
-  onDragEnd: () => void
-  onDropOnto: () => void
   onMoveUp: () => void
   onMoveDown: () => void
   onChange: (patch: Partial<FeedbackQuestion>) => void
@@ -332,12 +362,19 @@ interface QuestionCardProps {
 }
 
 function QuestionCard({
-  q, index, total, language, isDragging, onDragStart, onDragEnd, onDropOnto, onMoveUp, onMoveDown, onChange, onRemove,
+  q, index, total, language, onMoveUp, onMoveDown, onChange, onRemove,
 }: QuestionCardProps) {
   const Icon = TYPE_META[q.type].icon
   const refine = useRefineQuestion()
   const [refineOpen, setRefineOpen] = useState(false)
   const [instruction, setInstruction] = useState('')
+
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: q.id })
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : undefined,
+  }
 
   async function runRefine() {
     if (!instruction.trim()) return
@@ -376,21 +413,20 @@ function QuestionCard({
 
   return (
     <div
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={onDropOnto}
+      ref={setNodeRef}
+      style={style}
       className={cn(
-        'rounded-card border bg-surface transition-colors',
-        isDragging ? 'border-primary ring-2 ring-primary/25 opacity-60' : 'border-line',
+        'rounded-card border bg-surface transition-shadow',
+        isDragging ? 'border-primary/50 shadow-lg opacity-40' : 'border-line',
       )}
     >
       <div className="flex items-start gap-2 p-3">
         {/* Handle drag + reorder */}
         <div className="flex flex-col items-center pt-1 shrink-0">
           <span
-            draggable
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-            className="cursor-grab active:cursor-grabbing text-fg-subtle hover:text-fg"
+            {...attributes}
+            {...listeners}
+            className="cursor-grab active:cursor-grabbing text-fg-subtle hover:text-fg touch-none"
             aria-label="Seret untuk memindah"
             title="Seret untuk memindah"
           >
@@ -486,6 +522,20 @@ function QuestionCard({
           />
         </div>
       </div>
+    </div>
+  )
+}
+
+// Kartu "melayang" yang mengikuti kursor selama drag (efek angkat ala Jira).
+// Tampilan ringkas saja — interaksi form tidak perlu di sini.
+function QuestionCardOverlay({ q }: { q: FeedbackQuestion | null }) {
+  if (!q) return null
+  const Icon = TYPE_META[q.type].icon
+  return (
+    <div className="flex items-center gap-2 px-3 py-3 rounded-card border border-primary bg-surface shadow-2xl scale-[1.02] cursor-grabbing">
+      <GripVertical className="w-4 h-4 text-fg-subtle shrink-0" />
+      <Icon className="w-4 h-4 text-fg-muted shrink-0" />
+      <span className="text-body text-fg truncate">{q.label || 'Pertanyaan'}</span>
     </div>
   )
 }
@@ -593,23 +643,74 @@ function ChoiceEditor({
   )
 }
 
-// ── Panel AI (saran pertanyaan) ───────────────────────────────────────────────
+// ── Panel AI (saran pertanyaan, async + persisten) ────────────────────────────
+//
+// Generate bisa makan waktu lama (banyak lampiran/konteks), jadi alurnya tidak
+// menahan koneksi: sekali diminta, form langsung tersimpan dengan status
+// processing_ai/need_clarification, dan panel ini merekonstruksi tampilannya
+// dari data form yang di-poll (bukan state lokal) — pindah halaman lalu
+// kembali tidak menghilangkan progres.
+
+const QUESTION_TYPE_ORDER: QuestionType[] = ['rating', 'text', 'choice', 'nps']
 
 function AIPanel({
-  defaultOpen, language, onAdd,
+  defaultOpen, formId, language, onFormCreated, onAdd,
 }: {
   defaultOpen: boolean
+  formId: string | undefined
   language: FormLanguage
+  onFormCreated: (id: string, derivedTitle: string) => void
   onAdd: (q: SuggestedQuestion[]) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
   const [prompt, setPrompt] = useState('')
   const [files, setFiles] = useState<File[]>([])
-  const [suggestions, setSuggestions] = useState<SuggestedQuestion[]>([])
   const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [degraded, setDegraded] = useState(false)
+  const [clarifyAnswers, setClarifyAnswers] = useState<string[]>([])
+  const [typeConfigOpen, setTypeConfigOpen] = useState(false)
+  const [typeCounts, setTypeCounts] = useState<TypeCountsInput>({})
+  const [localFormId, setLocalFormId] = useState<string | undefined>(formId)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  const { data: form } = useFeedbackForm(localFormId)
   const suggest = useSuggestQuestions()
+  const submitClarify = useSubmitClarifyAnswers()
+  const clearJob = useClearAIJob()
+
+  const job = form?.ai_job ?? null
+  const isProcessing = form?.status === 'processing_ai'
+  const isClarifying = form?.status === 'need_clarification' && (job?.clarifying_questions.length ?? 0) > 0
+  const pending = job?.pending_questions ?? []
+
+  // Tiga penyesuaian "derived state" di bawah dilakukan LANGSUNG di badan
+  // render (pola resmi React untuk "sesuaikan state saat prop/data berubah"),
+  // bukan lewat useEffect — memanggil setState sinkron di dalam efek memicu
+  // render tambahan yang tak perlu.
+
+  // formId milik parent menang begitu tersedia (mis. user sudah Simpan Draft
+  // sebelum membuka panel ini) — supaya saran AI menempel ke form yang sama,
+  // bukan membuat form baru.
+  const [prevFormIdProp, setPrevFormIdProp] = useState(formId)
+  if (formId && formId !== prevFormIdProp) {
+    setPrevFormIdProp(formId)
+    setLocalFormId(formId)
+  }
+
+  // Sinkronkan panjang array jawaban dengan jumlah pertanyaan klarifikasi
+  // terbaru (berubah tiap kali form ter-poll dengan job baru).
+  const clarifyCount = isClarifying ? job!.clarifying_questions.length : 0
+  const [prevClarifyCount, setPrevClarifyCount] = useState(-1)
+  if (isClarifying && clarifyCount !== prevClarifyCount) {
+    setPrevClarifyCount(clarifyCount)
+    setClarifyAnswers((prev) => job!.clarifying_questions.map((_, i) => prev[i] ?? ''))
+  }
+
+  // Pilih semua opsi secara default begitu daftar pending muncul/berubah.
+  const [prevPendingCount, setPrevPendingCount] = useState(0)
+  if (pending.length !== prevPendingCount) {
+    setPrevPendingCount(pending.length)
+    setSelected(pending.length > 0 ? new Set(pending.map((_, i) => i)) : new Set())
+  }
 
   function addFiles(list: FileList | null) {
     if (!list || list.length === 0) return
@@ -631,16 +732,48 @@ function AIPanel({
     if (fileRef.current) fileRef.current.value = ''
   }
 
+  function openTypeConfig() {
+    setTypeConfigOpen(true)
+    // Default tiap tipe: acak (bebas jumlahnya) — hanya diisi sekali saat
+    // pertama dibuka; kalau user sudah pernah mengatur, jangan ditimpa.
+    setTypeCounts((prev) => (Object.keys(prev).length === 0
+      ? { rating: 'random', text: 'random', choice: 'random', nps: 'random' }
+      : prev))
+  }
+
+  function resetTypeConfig() {
+    setTypeConfigOpen(false)
+    setTypeCounts({})
+  }
+
   async function runSuggest() {
     try {
-      const res = await suggest.mutateAsync({ prompt, files, language })
-      setSuggestions(res.questions)
-      setSelected(new Set(res.questions.map((_, i) => i))) // pilih semua default
-      setDegraded(res.degraded)
-      if (res.degraded) toast.error('AI sedang tidak tersedia. Susun pertanyaan manual dulu ya.')
-      else if (res.questions.length === 0) toast.info('AI tidak menghasilkan saran. Coba perjelas kebutuhan.')
+      const created = await suggest.mutateAsync({ formId: localFormId, prompt, files, language, typeCounts })
+      setLocalFormId(created.id)
+      if (!formId) onFormCreated(created.id, created.title)
+      setFiles([])
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gagal meminta saran AI.')
+    }
+  }
+
+  async function submitAnswers() {
+    if (!localFormId) return
+    try {
+      await submitClarify.mutateAsync({ formId: localFormId, answers: clarifyAnswers })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gagal mengirim jawaban klarifikasi.')
+    }
+  }
+
+  async function cancelJob() {
+    if (!localFormId) return
+    try {
+      await clearJob.mutateAsync(localFormId)
+      setPrompt('')
+      setFiles([])
     } catch {
-      toast.error('Gagal meminta saran AI.')
+      toast.error('Gagal membatalkan.')
     }
   }
 
@@ -653,15 +786,20 @@ function AIPanel({
     })
   }
 
-  function addSelected() {
-    const chosen = suggestions.filter((_, i) => selected.has(i))
-    if (chosen.length === 0) return
+  async function addSelected() {
+    const chosen = pending.filter((_, i) => selected.has(i))
+    if (chosen.length === 0 || !localFormId) return
     onAdd(chosen)
-    setSuggestions([])
     setSelected(new Set())
     setPrompt('')
     setFiles([])
     toast.success(`${chosen.length} pertanyaan ditambahkan.`)
+    try {
+      await clearJob.mutateAsync(localFormId)
+    } catch {
+      // Best-effort: pertanyaan sudah masuk ke form lokal: sisa job sementara
+      // yang gagal dibersihkan tidak fatal, cuma tampil lagi saat dibuka nanti.
+    }
   }
 
   return (
@@ -670,70 +808,51 @@ function AIPanel({
         <button type="button" onClick={() => setOpen((o) => !o)} className="flex items-center gap-2 text-left">
           <Sparkles className="w-4 h-4 text-accent" />
           <span className="text-body font-semibold text-fg">Susun dengan bantuan AI</span>
-          {degraded && <Badge tone="warning">AI tidak tersedia</Badge>}
+          {isProcessing && <Badge tone="info">Memproses…</Badge>}
+          {isClarifying && <Badge tone="warning">Perlu klarifikasi</Badge>}
           <span className="ml-auto text-caption text-fg-muted">{open ? 'Sembunyikan' : 'Buka'}</span>
         </button>
 
         {open && (
           <div className="flex flex-col gap-3">
-            <Field label="Ceritakan kebutuhan kuesioner" helper="Jelaskan tujuan form dan hal yang ingin diukur dari client.">
-              <Textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Tulis kebutuhan kuesioner Anda" />
-            </Field>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <input
-                ref={fileRef}
-                type="file"
-                accept="application/pdf,image/*,.pdf,.png,.jpg,.jpeg,.webp"
-                multiple
-                className="hidden"
-                onChange={(e) => addFiles(e.target.files)}
-              />
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                leftIcon={<Paperclip className="w-4 h-4" />}
-                onClick={() => fileRef.current?.click()}
-              >
-                {files.length > 0 ? `Tambah lampiran (${files.length}/${MAX_FILES})` : 'Lampirkan dokumen'}
-              </Button>
-              <span className="text-caption text-fg-subtle">PDF atau gambar, maks {MAX_FILE_MB} MB/berkas</span>
-              <Button
-                className="ml-auto"
-                size="sm"
-                leftIcon={<Sparkles className="w-4 h-4" />}
-                loading={suggest.isPending}
-                onClick={() => void runSuggest()}
-              >
-                Minta saran AI
-              </Button>
-            </div>
-
-            {files.length > 0 && (
-              <div className="flex flex-col gap-1">
-                {files.map((f, i) => (
-                  <div key={`${f.name}-${i}`} className="flex items-center gap-2 text-caption text-fg-muted">
-                    <Paperclip className="w-3 h-3 shrink-0" aria-hidden="true" />
-                    <span className="truncate">{f.name}</span>
-                    <span className="text-fg-subtle shrink-0">{(f.size / (1024 * 1024)).toFixed(1)} MB</span>
-                    <button
-                      type="button"
-                      onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
-                      className="text-fg-subtle hover:text-danger shrink-0"
-                      aria-label="Hapus lampiran"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
+            {job?.error && !isProcessing && !isClarifying && pending.length === 0 && (
+              <div className="flex items-center gap-2 rounded-btn border border-danger/30 bg-danger/5 px-3 py-2 text-caption text-danger">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                <span>{job.error}</span>
               </div>
             )}
 
-            {suggestions.length > 0 && (
+            {isProcessing ? (
+              <div className="flex items-center gap-2 py-4 text-body text-fg-muted">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                <span>AI sedang menyusun pertanyaan. Boleh tinggalkan halaman ini — hasilnya tersimpan otomatis.</span>
+              </div>
+            ) : isClarifying ? (
+              <div className="flex flex-col gap-3 border-t border-line pt-3">
+                <p className="text-body text-fg font-medium">Bantu perjelas dulu, supaya saran AI lebih tepat sasaran</p>
+                {job!.clarifying_questions.map((q, i) => (
+                  <Field key={i} label={q}>
+                    <Input
+                      value={clarifyAnswers[i] ?? ''}
+                      onChange={(e) => setClarifyAnswers((prev) => prev.map((a, idx) => (idx === i ? e.target.value : a)))}
+                      placeholder="Tulis jawaban"
+                      onKeyDown={(e) => e.key === 'Enter' && void submitAnswers()}
+                    />
+                  </Field>
+                ))}
+                <div className="flex items-center gap-3">
+                  <Button size="sm" leftIcon={<Sparkles className="w-4 h-4" />} loading={submitClarify.isPending} onClick={() => void submitAnswers()}>
+                    Lanjutkan
+                  </Button>
+                  <button type="button" onClick={() => void cancelJob()} className="text-caption text-fg-subtle hover:text-fg underline">
+                    Batalkan
+                  </button>
+                </div>
+              </div>
+            ) : pending.length > 0 ? (
               <div className="flex flex-col gap-2 border-t border-line pt-3">
                 <p className="text-caption text-fg-muted">Pilih pertanyaan yang mau dipakai:</p>
-                {suggestions.map((s, i) => {
+                {pending.map((s, i) => {
                   const Icon = TYPE_META[s.type].icon
                   const on = selected.has(i)
                   return (
@@ -761,14 +880,153 @@ function AIPanel({
                     </button>
                   )
                 })}
-                <Button size="sm" className="self-start" leftIcon={<Plus className="w-4 h-4" />} onClick={addSelected}>
-                  Tambahkan yang dipilih ({selected.size})
-                </Button>
+                <div className="flex items-center gap-3">
+                  <Button size="sm" leftIcon={<Plus className="w-4 h-4" />} loading={clearJob.isPending} onClick={() => void addSelected()}>
+                    Tambahkan yang dipilih ({selected.size})
+                  </Button>
+                  <button type="button" onClick={() => void cancelJob()} className="text-caption text-fg-subtle hover:text-fg underline">
+                    Buang saran ini
+                  </button>
+                </div>
               </div>
+            ) : (
+              <>
+                <Field label="Ceritakan kebutuhan kuesioner" helper="Jelaskan tujuan form dan hal yang ingin diukur dari client.">
+                  <Textarea rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Tulis kebutuhan kuesioner Anda" />
+                </Field>
+
+                {!typeConfigOpen ? (
+                  <button
+                    type="button"
+                    onClick={openTypeConfig}
+                    className="inline-flex items-center gap-1.5 self-start text-caption text-fg-muted hover:text-fg"
+                  >
+                    <Settings2 className="w-3.5 h-3.5" /> Atur tipe & jumlah pertanyaan
+                  </button>
+                ) : (
+                  <div className="flex flex-col gap-2 rounded-btn border border-line p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-caption text-fg-muted">
+                        Atur tipe & jumlah pertanyaan (kosongkan/acak = AI bebas menentukan)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={resetTypeConfig}
+                        className="inline-flex items-center gap-1 text-caption text-fg-subtle hover:text-fg"
+                      >
+                        <RotateCcw className="w-3 h-3" /> Reset ke otomatis
+                      </button>
+                    </div>
+                    {QUESTION_TYPE_ORDER.map((t) => (
+                      <TypeCountRow
+                        key={t}
+                        label={TYPE_META[t].label}
+                        value={typeCounts[t]}
+                        onChange={(v) => setTypeCounts((prev) => ({ ...prev, [t]: v }))}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="application/pdf,image/*,.pdf,.png,.jpg,.jpeg,.webp"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => addFiles(e.target.files)}
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    leftIcon={<Paperclip className="w-4 h-4" />}
+                    onClick={() => fileRef.current?.click()}
+                  >
+                    {files.length > 0 ? `Tambah lampiran (${files.length}/${MAX_FILES})` : 'Lampirkan dokumen'}
+                  </Button>
+                  <span className="text-caption text-fg-subtle">PDF atau gambar, maks {MAX_FILE_MB} MB/berkas</span>
+                  <Button
+                    className="ml-auto"
+                    size="sm"
+                    leftIcon={<Sparkles className="w-4 h-4" />}
+                    loading={suggest.isPending}
+                    onClick={() => void runSuggest()}
+                  >
+                    Minta saran AI
+                  </Button>
+                </div>
+
+                {files.length > 0 && (
+                  <div className="flex flex-col gap-1">
+                    {files.map((f, i) => (
+                      <div key={`${f.name}-${i}`} className="flex items-center gap-2 text-caption text-fg-muted">
+                        <Paperclip className="w-3 h-3 shrink-0" aria-hidden="true" />
+                        <span className="truncate">{f.name}</span>
+                        <span className="text-fg-subtle shrink-0">{(f.size / (1024 * 1024)).toFixed(1)} MB</span>
+                        <button
+                          type="button"
+                          onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                          className="text-fg-subtle hover:text-danger shrink-0"
+                          aria-label="Hapus lampiran"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
       </CardBody>
     </Card>
+  )
+}
+
+// Satu baris konfigurasi tipe & jumlah pertanyaan: tombol "Acak" atau angka
+// pasti (0 = tidak disertakan sama sekali). Kosong (undefined) berarti tipe
+// itu belum disebutkan sama sekali — dibiarkan sepenuhnya bebas untuk AI.
+function TypeCountRow({
+  label, value, onChange,
+}: {
+  label: string
+  value: number | 'random' | undefined
+  onChange: (v: number | 'random' | undefined) => void
+}) {
+  const isRandom = value === 'random'
+  const isFixed = typeof value === 'number'
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-caption text-fg w-32 shrink-0">{label}</span>
+      <button
+        type="button"
+        onClick={() => onChange('random')}
+        className={cn(
+          'px-2.5 py-1 rounded-btn text-caption border transition-colors',
+          isRandom ? 'border-primary bg-primary-subtle text-primary' : 'border-line text-fg-muted hover:bg-surface-subtle',
+        )}
+      >
+        Acak
+      </button>
+      <Input
+        type="number"
+        min={0}
+        max={10}
+        value={isFixed ? value : ''}
+        placeholder="jumlah"
+        onChange={(e) => {
+          const raw = e.target.value
+          if (raw === '') { onChange(undefined); return }
+          onChange(Math.max(0, Math.min(10, Number(raw) || 0)))
+        }}
+        className="w-20"
+      />
+      <span className="text-caption text-fg-subtle">
+        {isFixed ? (value === 0 ? 'tidak disertakan' : `tepat ${value} pertanyaan`) : isRandom ? 'jumlah bebas' : 'bebas ditentukan AI'}
+      </span>
+    </div>
   )
 }

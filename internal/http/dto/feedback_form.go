@@ -42,8 +42,14 @@ type FeedbackRefineRequest struct {
 	Language    *string              `json:"language"`
 }
 
-// SuggestedQuestionDTO mencerminkan service.SuggestedQuestion agar handler
-// tidak mengimpor tipe service ke body request.
+// FeedbackClarifyAnswersRequest — jawaban user atas AIJob.ClarifyingQuestions
+// (urutan harus sama dengan urutan pertanyaan yang ditampilkan).
+type FeedbackClarifyAnswersRequest struct {
+	Answers []string `json:"answers"`
+}
+
+// SuggestedQuestionDTO mencerminkan domain.SuggestedQuestion agar handler
+// tidak perlu bind langsung ke tipe domain dari body request.
 type SuggestedQuestionDTO struct {
 	Type        string   `json:"type"`
 	Label       string   `json:"label"`

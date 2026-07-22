@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"salespilot/internal/domain"
@@ -10,9 +12,14 @@ import (
 )
 
 // FeedbackAIService membantu menyusun & menganalisa form feedback dengan AI.
-// Semua metode degrade-graceful (pola KeywordService): bila Hermes gagal,
-// kembalikan hasil kosong + Degraded=true, bukan error — UI tetap bisa jalan
-// manual.
+// RefineQuestion/AnalyzeFeedback tetap SINKRON (satu pertanyaan/satu ringkasan
+// — cepat) dan degrade-graceful (pola KeywordService): bila Hermes gagal,
+// kembalikan hasil kosong/asal + Degraded=true, bukan error.
+//
+// Susun kuesioner (SuggestQuestions dulu) kini ASINKRON — lihat
+// FeedbackFormService.StartAISuggest — karena generate 6-9 pertanyaan +
+// lampiran bisa makan waktu lama; helper prompt-building & evaluasi hasil di
+// bawah ini dipakai bersama oleh jalur async tersebut.
 type FeedbackAIService struct {
 	hc hermes.Client
 	sk hermes.SessionKey
@@ -22,103 +29,188 @@ func NewFeedbackAIService(hc hermes.Client, sk hermes.SessionKey) *FeedbackAISer
 	return &FeedbackAIService{hc: hc, sk: sk}
 }
 
-// SuggestedQuestion adalah pertanyaan usulan AI (tanpa ID — ID diberi saat
-// user memilih & menambahkannya ke form).
-type SuggestedQuestion struct {
-	Type        domain.QuestionType `json:"type"`
-	Label       string              `json:"label"`
-	Description string              `json:"description,omitempty"`
-	Scale       int                 `json:"scale,omitempty"`
-	Options     []string            `json:"options,omitempty"`
-	Multiple    bool                `json:"multiple,omitempty"`
-	MinLabel    string              `json:"min_label,omitempty"`
-	MaxLabel    string              `json:"max_label,omitempty"`
-}
+// suggestConfidenceThreshold adalah ambang confidence (0-100) di bawah mana
+// AI diminta bertanya klarifikasi ke user dulu, alih-alih mengarang kuesioner
+// dari konteks yang masih tipis/ambigu.
+const suggestConfidenceThreshold = 85
 
-// SuggestQuestionsResult membungkus usulan + flag degrade.
-type SuggestQuestionsResult struct {
-	Questions []SuggestedQuestion `json:"questions"`
-	Degraded  bool                `json:"degraded"`
-}
+// maxClarifyingQuestions membatasi jumlah pertanyaan klarifikasi per putaran
+// agar tidak membebani user.
+const maxClarifyingQuestions = 4
 
-// SuggestQuestions meminta AI mengusulkan pertanyaan kuesioner dari deskripsi
-// kebutuhan (prompt) + lampiran opsional (satu atau BANYAK PDF/gambar konteks
-// proyek). lang menentukan bahasa pertanyaan yang dihasilkan.
-func (s *FeedbackAIService) SuggestQuestions(ctx context.Context, prompt string, files []hermes.AgentDocument, lang domain.FormLanguage) (*SuggestQuestionsResult, error) {
-	instruction := buildSuggestPrompt(prompt, lang)
+// maxClarifyRounds membatasi berapa kali user boleh diminta klarifikasi
+// sebelum AI dipaksa menyusun kuesioner terbaik dari info yang tersedia
+// (mencegah percakapan klarifikasi tak berkesudahan).
+const maxClarifyRounds = 3
 
-	// PENTING: GenerateJSON memakai nilai `out` sekaligus sebagai contoh schema
-	// yang dikirim ke model. Slice/objek NIL akan ter-serialisasi jadi
-	// `{"questions":null}` — schema kosong yang membuat provider malah
-	// mengembalikan `{"questions":null}` (bukan menghasilkan isi). Pra-isi satu
-	// elemen contoh agar schema informatif; hasil unmarshal menimpanya penuh.
-	out := struct {
-		Questions []SuggestedQuestion `json:"questions"`
-	}{Questions: []SuggestedQuestion{exampleSuggested()}}
+// minSuggestPromptWords adalah ambang jumlah kata prompt di bawah mana
+// konteks dianggap terlalu tipis untuk disimpulkan sendiri oleh AI. LLM
+// cenderung terlalu percaya diri saat diminta menilai confidence sendiri
+// (selalu merasa "cukup jelas" agar terlihat membantu) — jadi kasus paling
+// umum (prompt kosong/sangat singkat seperti "buatkan feedback") ditangani
+// deterministik di sini, tanpa bergantung pada penilaian model.
+const minSuggestPromptWords = 3
 
-	err := s.generate(ctx, instruction, files, &out)
-	if err != nil && len(files) > 0 {
-		// Lampiran gagal diproses (mis. berkas tak terbaca): jangan sampai
-		// melampirkan berkas malah menggagalkan segalanya — coba ulang tanpa
-		// lampiran memakai prompt saja.
-		out.Questions = []SuggestedQuestion{exampleSuggested()}
-		err = s.generate(ctx, instruction, nil, &out)
+// looksTooVagueForSuggest menandai prompt yang terlalu singkat untuk disusun
+// jadi kuesioner relevan (tanpa lampiran yang bisa jadi konteks pengganti).
+func looksTooVagueForSuggest(prompt string, hasFiles bool) bool {
+	if hasFiles {
+		return false
 	}
-	if err != nil {
-		return &SuggestQuestionsResult{Questions: []SuggestedQuestion{}, Degraded: true}, nil
-	}
-	return &SuggestQuestionsResult{Questions: sanitizeSuggestions(out.Questions), Degraded: false}, nil
+	return len(strings.Fields(strings.TrimSpace(prompt))) < minSuggestPromptWords
 }
 
-// generate memilih jalur Hermes yang tepat: banyak dokumen → MultiDocumentExtractor,
-// satu dokumen → DocumentExtractor, tanpa dokumen → GenerateJSON biasa. Bila
-// kapabilitas dokumen tak tersedia, jatuh ke teks-saja agar tetap jalan.
-func (s *FeedbackAIService) generate(ctx context.Context, instruction string, files []hermes.AgentDocument, out any) error {
-	nonEmpty := make([]hermes.AgentDocument, 0, len(files))
-	for _, f := range files {
-		if len(f.Bytes) > 0 {
-			nonEmpty = append(nonEmpty, f)
+// defaultClarifyingQuestions adalah pertanyaan klarifikasi baku untuk prompt
+// yang terlalu tipis (dipakai looksTooVagueForSuggest), dalam bahasa form.
+func defaultClarifyingQuestions(lang domain.FormLanguage) []string {
+	if lang == domain.LangEN {
+		return []string{
+			"What kind of project or service is this feedback form for?",
+			"Who will be filling out this form (the respondent's role)?",
+			"What aspect do you most want to measure or improve from this feedback?",
 		}
 	}
+	return []string{
+		"Form ini untuk jenis proyek atau layanan apa?",
+		"Siapa yang akan mengisi form ini (peran/posisi client)?",
+		"Aspek apa yang paling ingin diukur atau diperbaiki dari feedback ini?",
+	}
+}
+
+// TypeCountSpec adalah konfigurasi jumlah pertanyaan per tipe dari user:
+// Random=true berarti AI bebas menentukan jumlahnya (minimal 1); selain itu
+// Count adalah jumlah PERSIS yang wajib dihasilkan (0 = jangan sertakan sama
+// sekali tipe itu).
+type TypeCountSpec struct {
+	Random bool
+	Count  int
+}
+
+// parseTypeCounts mem-parse field multipart "type_counts" (JSON object,
+// mis. {"rating":"random","text":2,"choice":0,"nps":"random"}) menjadi
+// spesifikasi per tipe. String kosong/"{}" berarti user tidak mengatur
+// apa pun → map kosong (AI bebas menentukan tipe & jumlah sepenuhnya).
+func ParseSuggestTypeCounts(raw string) (map[domain.QuestionType]TypeCountSpec, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return map[domain.QuestionType]TypeCountSpec{}, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &fields); err != nil {
+		return nil, fmt.Errorf("type_counts: JSON tidak valid: %w", err)
+	}
+	out := make(map[domain.QuestionType]TypeCountSpec, len(fields))
+	for k, v := range fields {
+		t := domain.QuestionType(k)
+		if !t.Valid() {
+			continue
+		}
+		var n int
+		if err := json.Unmarshal(v, &n); err == nil {
+			if n < 0 {
+				n = 0
+			}
+			out[t] = TypeCountSpec{Count: n}
+			continue
+		}
+		var s string
+		if err := json.Unmarshal(v, &s); err == nil && strings.EqualFold(strings.TrimSpace(s), "random") {
+			out[t] = TypeCountSpec{Random: true}
+			continue
+		}
+		return nil, fmt.Errorf("type_counts: nilai untuk %q harus angka atau \"random\"", k)
+	}
+	return out, nil
+}
+
+// typeCountsToStrings mengubah spesifikasi menjadi map[type]string untuk
+// disimpan pada domain.FeedbackAIJob.TypeCounts (JSONB) — dipakai lagi tanpa
+// perubahan pada putaran klarifikasi berikutnya.
+func typeCountsToStrings(spec map[domain.QuestionType]TypeCountSpec) map[domain.QuestionType]string {
+	if len(spec) == 0 {
+		return nil
+	}
+	out := make(map[domain.QuestionType]string, len(spec))
+	for t, s := range spec {
+		if s.Random {
+			out[t] = "random"
+		} else {
+			out[t] = strconv.Itoa(s.Count)
+		}
+	}
+	return out
+}
+
+// typeCountsFromStrings adalah kebalikan typeCountsToStrings, dipakai saat
+// membaca AIJob.TypeCounts kembali dari DB untuk putaran klarifikasi lanjutan.
+func typeCountsFromStrings(m map[domain.QuestionType]string) map[domain.QuestionType]TypeCountSpec {
+	if len(m) == 0 {
+		return map[domain.QuestionType]TypeCountSpec{}
+	}
+	out := make(map[domain.QuestionType]TypeCountSpec, len(m))
+	for t, v := range m {
+		if strings.EqualFold(v, "random") {
+			out[t] = TypeCountSpec{Random: true}
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			n = 0
+		}
+		out[t] = TypeCountSpec{Count: n}
+	}
+	return out
+}
+
+// evaluateSuggestJSON mem-parse output mentah model (dari callback
+// /v1/agent-task ATAU dari GenerateJSON) dan menerapkan aturan keputusan
+// confidence/klarifikasi yang SAMA di satu tempat, supaya jalur async (lihat
+// FeedbackFormService.CompleteAISuggest) tidak duplikasi logika ini.
+func evaluateSuggestJSON(raw json.RawMessage) (confidence int, clarify []string, questions []domain.SuggestedQuestion, err error) {
+	var out struct {
+		Confidence          int                        `json:"confidence"`
+		ClarifyingQuestions []string                    `json:"clarifying_questions"`
+		Questions           []domain.SuggestedQuestion `json:"questions"`
+	}
+	if e := json.Unmarshal(raw, &out); e != nil {
+		return 0, nil, nil, e
+	}
+	confidence = out.Confidence
 	switch {
-	case len(nonEmpty) > 1:
-		if de, ok := s.hc.(hermes.MultiDocumentExtractor); ok {
-			_, err := de.GenerateJSONFromDocuments(ctx, instruction, nonEmpty, out, s.sk)
-			return err
-		}
-		// Fallback: kirim dokumen pertama saja lewat DocumentExtractor.
-		if de, ok := s.hc.(hermes.DocumentExtractor); ok {
-			_, err := de.GenerateJSONFromDocument(ctx, instruction, nonEmpty[0].Filename, nonEmpty[0].Bytes, out, s.sk)
-			return err
-		}
-	case len(nonEmpty) == 1:
-		if de, ok := s.hc.(hermes.DocumentExtractor); ok {
-			_, err := de.GenerateJSONFromDocument(ctx, instruction, nonEmpty[0].Filename, nonEmpty[0].Bytes, out, s.sk)
-			return err
-		}
+	case confidence < 0:
+		confidence = 0
+	case confidence > 100:
+		confidence = 100
 	}
-	_, err := s.hc.GenerateJSON(ctx, instruction, out, s.sk)
-	return err
+	clarify = nonNil(out.ClarifyingQuestions)
+	if len(clarify) > maxClarifyingQuestions {
+		clarify = clarify[:maxClarifyingQuestions]
+	}
+	if confidence < suggestConfidenceThreshold && len(clarify) > 0 {
+		return confidence, clarify, []domain.SuggestedQuestion{}, nil
+	}
+	return confidence, []string{}, sanitizeSuggestions(out.Questions), nil
 }
 
 // RefineQuestionResult membungkus satu pertanyaan hasil revisi + flag degrade.
 type RefineQuestionResult struct {
-	Question SuggestedQuestion `json:"question"`
-	Degraded bool              `json:"degraded"`
+	Question domain.SuggestedQuestion `json:"question"`
+	Degraded bool                     `json:"degraded"`
 }
 
 // RefineQuestion merevisi satu pertanyaan mengikuti instruksi user (fitur
 // "edit dengan AI" per pertanyaan). Bila AI gagal, kembalikan pertanyaan asal.
-func (s *FeedbackAIService) RefineQuestion(ctx context.Context, q SuggestedQuestion, instruction string, lang domain.FormLanguage) (*RefineQuestionResult, error) {
+func (s *FeedbackAIService) RefineQuestion(ctx context.Context, q domain.SuggestedQuestion, instruction string, lang domain.FormLanguage) (*RefineQuestionResult, error) {
 	prompt := buildRefinePrompt(q, instruction, lang)
-	// Pra-isi contoh (lihat catatan di SuggestQuestions) agar schema informatif.
+	// Pra-isi contoh agar schema hint informatif (lihat catatan di
+	// exampleSuggested) — hasil unmarshal menimpanya penuh.
 	out := struct {
-		Question SuggestedQuestion `json:"question"`
+		Question domain.SuggestedQuestion `json:"question"`
 	}{Question: exampleSuggested()}
 	if _, err := s.hc.GenerateJSON(ctx, prompt, &out, s.sk); err != nil {
 		return &RefineQuestionResult{Question: q, Degraded: true}, nil
 	}
-	cleaned := sanitizeSuggestions([]SuggestedQuestion{out.Question})
+	cleaned := sanitizeSuggestions([]domain.SuggestedQuestion{out.Question})
 	if len(cleaned) == 0 {
 		return &RefineQuestionResult{Question: q, Degraded: true}, nil
 	}
@@ -150,7 +242,7 @@ func (s *FeedbackAIService) AnalyzeFeedback(ctx context.Context, a *FormAnalytic
 		}, nil
 	}
 	prompt := buildAnalyzePrompt(a, lang)
-	// Pra-isi contoh (lihat catatan di SuggestQuestions) agar slice tidak
+	// Pra-isi contoh (lihat catatan di exampleSuggested) agar slice tidak
 	// ter-serialisasi jadi null di schema — jika tidak, model mengembalikan
 	// semua array null.
 	out := struct {
@@ -193,14 +285,51 @@ func langName(lang domain.FormLanguage) string {
 	return "Bahasa Indonesia"
 }
 
-func buildSuggestPrompt(userPrompt string, lang domain.FormLanguage) string {
+// questionTypeOrder adalah urutan tampil tetap untuk instruksi tipe/jumlah.
+var questionTypeOrder = []domain.QuestionType{
+	domain.QuestionRating, domain.QuestionText, domain.QuestionChoice, domain.QuestionNPS,
+}
+
+// buildTypeCountInstruction merakit instruksi WAJIB tentang tipe & jumlah
+// pertanyaan dari konfigurasi user. Map kosong berarti user tidak mengatur
+// apa pun → AI bebas menentukan tipe DAN jumlah sepenuhnya sendiri.
+func buildTypeCountInstruction(spec map[domain.QuestionType]TypeCountSpec) string {
+	if len(spec) == 0 {
+		return "Tipe & jumlah pertanyaan BEBAS kamu tentukan sendiri — pilih campuran tipe (rating/text/choice/nps) dan total jumlah yang paling pas untuk konteks ini, SELAMA variatif dan bernilai untuk analisa (lihat STANDAR NILAI ANALISA di bawah).\n"
+	}
 	var b strings.Builder
-	b.WriteString("Kamu konsultan riset pengalaman client yang menyusun kuesioner feedback pasca-proyek untuk sebuah perusahaan jasa/teknologi. ")
+	b.WriteString("Ikuti KETENTUAN JUMLAH PERTANYAAN PER TIPE berikut (WAJIB dipatuhi persis, ini permintaan eksplisit user):\n")
+	specified := make(map[domain.QuestionType]bool, len(spec))
+	for _, t := range questionTypeOrder {
+		c, ok := spec[t]
+		if !ok {
+			continue
+		}
+		specified[t] = true
+		switch {
+		case c.Random:
+			fmt.Fprintf(&b, "- Tipe %q: sertakan MINIMAL 1, kamu bebas menentukan jumlah persisnya (tetap variatif & bernilai analisa).\n", string(t))
+		case c.Count <= 0:
+			fmt.Fprintf(&b, "- Tipe %q: JANGAN sertakan sama sekali.\n", string(t))
+		default:
+			fmt.Fprintf(&b, "- Tipe %q: sertakan TEPAT %d pertanyaan.\n", string(t), c.Count)
+		}
+	}
+	if len(specified) < len(questionTypeOrder) {
+		b.WriteString("Tipe lain yang tidak disebutkan di atas: bebas kamu tentukan (boleh 0 boleh lebih) sesuai kebutuhan analisa.\n")
+	}
+	return b.String()
+}
+
+func buildSuggestPrompt(userPrompt string, lang domain.FormLanguage, typeSpec map[domain.QuestionType]TypeCountSpec) string {
+	var b strings.Builder
+	b.WriteString("Kamu konsultan riset pengalaman client yang membantu MENYUSUNKAN kuesioner feedback pasca-proyek untuk sebuah perusahaan jasa/teknologi. ")
+	b.WriteString("Kamu berbicara ke DUA pihak berbeda: (1) USER, staf perusahaan yang meminta bantuanmu menyusun form — ke merekalah kamu mengajukan pertanyaan klarifikasi bila konteks belum jelas; (2) RESPONDEN, client yang nanti mengisi kuesioner — untuk merekalah isi kuesioner ditulis. Jangan sampai tertukar.\n\n")
 	b.WriteString("Tujuan kuesioner: mengukur kepuasan client SEKALIGUS menghasilkan data yang bernilai untuk analisa kekurangan dan rekomendasi perbaikan.\n\n")
 
 	b.WriteString("KONTEKS DARI USER: ")
 	if strings.TrimSpace(userPrompt) == "" {
-		b.WriteString("(tidak diisi) — susun kuesioner kepuasan client umum untuk proyek jasa/teknologi.")
+		b.WriteString("(tidak diisi)")
 	} else {
 		b.WriteString(strings.TrimSpace(userPrompt))
 	}
@@ -210,25 +339,38 @@ func buildSuggestPrompt(userPrompt string, lang domain.FormLanguage) string {
 	b.WriteString("Kaitkan pertanyaan dengan hal konkret dari lampiran: nama/lingkup proyek, deliverable, milestone, teknologi, pihak yang terlibat, dan janji layanan. ")
 	b.WriteString("Prioritaskan isi lampiran + konteks user di atas pertanyaan generik.\n\n")
 
+	b.WriteString("LANGKAH 1 — NILAI KEJELASAN KONTEKS lebih dulu. Tentukan skor confidence 0-100 seberapa jelas kamu memahami: jenis/lingkup proyek, siapa target responden, dan aspek yang paling ingin diketahui perusahaan dari feedback ini (dari konteks user + lampiran di atas).\n")
+	b.WriteString("- Bila confidence DI BAWAH 85 (konteks belum cukup jelas, ada istilah ambigu, atau tujuan pengukuran belum jelas): JANGAN mengarang isi kuesioner. Tulis 2 sampai 4 PERTANYAAN KLARIFIKASI singkat untuk USER (bukan untuk responden) — misalnya jenis/nama proyek, siapa yang akan mengisi form, atau aspek yang paling ingin diukur. Kosongkan \"questions\" (array kosong).\n")
+	b.WriteString("- Bila confidence 85 KE ATAS: kosongkan \"clarifying_questions\" (array kosong) dan lanjut ke LANGKAH 2.\n\n")
+
+	b.WriteString("LANGKAH 2 — SUSUN PERTANYAAN KUESIONER (hanya bila confidence sudah 85 ke atas).\n\n")
+	b.WriteString(buildTypeCountInstruction(typeSpec))
+	b.WriteString("\n")
+
 	b.WriteString("PRINSIP PENYUSUNAN (agar hasilnya bernilai untuk analisa & improvement):\n")
 	b.WriteString("- Setiap pertanyaan mengukur SATU dimensi yang jelas dan dapat ditindaklanjuti. Cakup dimensi kunci yang relevan: kualitas hasil, kesesuaian dengan kebutuhan/scope, ketepatan waktu, komunikasi & responsivitas, kompetensi tim, dukungan/after-sales, dan nilai bisnis.\n")
-	b.WriteString("- Utamakan tipe terukur (rating/nps) untuk dimensi yang perlu dipantau & dibandingkan antar-waktu, sehingga skor rendah langsung menandai area perbaikan. Sertakan MINIMAL SATU pertanyaan teks terbuka untuk menggali alasan & usulan perbaikan dari client.\n")
-	b.WriteString("- Wajib sertakan satu pertanyaan NPS (kemungkinan merekomendasikan).\n")
-	b.WriteString("- Pada field description, tuliskan singkat DIMENSI yang diukur pertanyaan itu (mis. \"komunikasi\", \"ketepatan waktu\") agar mudah dianalisa.\n")
-	b.WriteString("- Usulkan 6–9 pertanyaan; hindari pertanyaan ganda/berlebihan.\n\n")
+	b.WriteString("- Utamakan tipe terukur (rating/nps) untuk dimensi yang perlu dipantau & dibandingkan antar-waktu, sehingga skor rendah langsung menandai area perbaikan. Sertakan MINIMAL SATU pertanyaan teks terbuka untuk menggali alasan & usulan perbaikan dari client (kecuali user secara eksplisit meminta 0 pertanyaan tipe text di atas).\n")
+	b.WriteString("- Bila tidak dilarang eksplisit di atas, sertakan satu pertanyaan NPS (kemungkinan merekomendasikan).\n")
+	b.WriteString("- Pada field description, tuliskan singkat DIMENSI yang diukur pertanyaan itu (mis. \"komunikasi\", \"ketepatan waktu\") agar mudah dianalisa.\n\n")
+
+	b.WriteString("STANDAR NILAI ANALISA (WAJIB — jangan sekadar formalitas):\n")
+	b.WriteString("- Sebelum memasukkan sebuah pertanyaan, uji: \"apakah jawaban atas pertanyaan ini bisa DIAGREGASI/DIANALISA lintas responden dan mengarah ke satu tindakan konkret?\" Bila tidak, buang atau perbaiki pertanyaan itu.\n")
+	b.WriteString("- DILARANG pertanyaan generik tanpa dimensi jelas (mis. \"Bagaimana pendapat Anda secara umum?\", \"Apakah Anda puas?\" tanpa konteks). Tiap pertanyaan HARUS terikat satu dimensi terukur & actionable.\n")
+	b.WriteString("- DILARANG dua pertanyaan yang pada dasarnya menanyakan hal yang sama (duplikat makna), termasuk antar-pertanyaan tipe rating yang sama — tiap rating harus mengukur dimensi BERBEDA.\n")
+	b.WriteString("- Pertanyaan choice: opsi jawaban harus saling lepas (mutually exclusive) dan mencakup kemungkinan yang wajar, bukan sekadar Ya/Tidak generik kecuali memang itu yang paling tepat untuk dimensinya.\n\n")
 
 	b.WriteString("Tipe yang boleh dipakai: ")
 	b.WriteString(`"rating" (angka 1..scale, default scale 5; WAJIB isi min_label & max_label sebagai keterangan ujung skala kiri/kanan), "text" (jawaban bebas), `)
 	b.WriteString(`"choice" (pilihan dari options minimal 2; set multiple=true bila boleh pilih banyak), "nps" (skor 0..10). `)
-	b.WriteString(fmt.Sprintf("Tulis SEMUA label, description, options, dan keterangan dalam %s yang sopan dan ringkas.\n\n", langName(lang)))
+	b.WriteString(fmt.Sprintf("Tulis SEMUA pertanyaan klarifikasi, label, description, options, dan keterangan dalam %s yang sopan dan ringkas.\n\n", langName(lang)))
 
 	b.WriteString("Balas HANYA JSON dengan schema persis: ")
-	b.WriteString(`{"questions": [{"type": "rating|text|choice|nps", "label": "...", "description": "dimensi yang diukur", "scale": 5, "options": ["..."], "multiple": false, "min_label": "", "max_label": ""}]}`)
+	b.WriteString(`{"confidence": 0, "clarifying_questions": ["..."], "questions": [{"type": "rating|text|choice|nps", "label": "...", "description": "dimensi yang diukur", "scale": 5, "options": ["..."], "multiple": false, "min_label": "", "max_label": ""}]}`)
 	b.WriteString(". Tanpa penjelasan, tanpa markdown, tanpa code fence.")
 	return b.String()
 }
 
-func buildRefinePrompt(q SuggestedQuestion, instruction string, lang domain.FormLanguage) string {
+func buildRefinePrompt(q domain.SuggestedQuestion, instruction string, lang domain.FormLanguage) string {
 	var b strings.Builder
 	b.WriteString("Revisi satu pertanyaan kuesioner feedback sesuai instruksi. Pertahankan maksud aslinya kecuali diminta berbeda.\n\n")
 	b.WriteString(fmt.Sprintf("Pertanyaan saat ini: tipe=%s, label=%q", q.Type, q.Label))
@@ -287,8 +429,8 @@ func buildAnalyzePrompt(a *FormAnalytics, lang domain.FormLanguage) string {
 // exampleSuggested adalah satu pertanyaan contoh untuk mengisi schema hint
 // GenerateJSON (agar tidak ter-serialisasi null). Nilainya tidak pernah
 // dipakai sebagai hasil — selalu ditimpa oleh output model.
-func exampleSuggested() SuggestedQuestion {
-	return SuggestedQuestion{
+func exampleSuggested() domain.SuggestedQuestion {
+	return domain.SuggestedQuestion{
 		Type:        domain.QuestionRating,
 		Label:       "contoh pertanyaan",
 		Description: "",
@@ -301,8 +443,8 @@ func exampleSuggested() SuggestedQuestion {
 }
 
 // sanitizeSuggestions memangkas usulan tak valid & menerapkan default aman.
-func sanitizeSuggestions(in []SuggestedQuestion) []SuggestedQuestion {
-	out := make([]SuggestedQuestion, 0, len(in))
+func sanitizeSuggestions(in []domain.SuggestedQuestion) []domain.SuggestedQuestion {
+	out := make([]domain.SuggestedQuestion, 0, len(in))
 	for _, q := range in {
 		q.Label = strings.TrimSpace(q.Label)
 		if q.Label == "" || !q.Type.Valid() {

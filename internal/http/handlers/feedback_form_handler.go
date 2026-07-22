@@ -92,18 +92,27 @@ func (h *FeedbackFormHandler) Create(c echo.Context) error {
 // stampCreator mengisi CreatedBy + CreatedByName dari user terautentikasi
 // (dipakai kolom "Dibuat oleh" di daftar). Best-effort: tanpa user, dilewati.
 func (h *FeedbackFormHandler) stampCreator(c echo.Context, f *domain.FeedbackForm) {
+	f.CreatedBy, f.CreatedByName = h.creatorFields(c)
+}
+
+// creatorFields mengembalikan (CreatedBy, CreatedByName) dari user
+// terautentikasi — dipakai baik saat Create biasa maupun saat StartAISuggest
+// membuat form baru secara implisit. Best-effort: tanpa user dikenali,
+// mengembalikan (nil, nil).
+func (h *FeedbackFormHandler) creatorFields(c echo.Context) (*string, *string) {
 	u, ok := auth.UserFromContext(c)
 	if !ok || u.ID == "" {
-		return
+		return nil, nil
 	}
 	id := u.ID
-	f.CreatedBy = &id
+	var name *string
 	if h.users != nil {
 		if usr, err := h.users.GetByID(c.Request().Context(), u.ID); err == nil && usr != nil && usr.Name != "" {
-			name := usr.Name
-			f.CreatedByName = &name
+			n := usr.Name
+			name = &n
 		}
 	}
+	return &id, name
 }
 
 // Get handles GET /api/feedback-forms/:id
@@ -213,19 +222,59 @@ func readSuggestFiles(c echo.Context) ([]hermes.AgentDocument, error) {
 }
 
 // AISuggest handles POST /api/feedback-forms/ai/suggest (multipart: prompt +
-// language + lampiran opsional "files" [banyak]).
+// language + type_counts opsional [JSON] + form_id opsional + lampiran
+// opsional "files" [banyak]). ASINKRON: form langsung disimpan dengan status
+// processing_ai/need_clarification dan dikembalikan seketika (202) — generate
+// yang sebenarnya berjalan di background Hermes dan melapor balik lewat
+// callback (lihat InternalHandler.CompleteFeedbackAISuggest). form_id kosong
+// berarti form belum tersimpan sama sekali — dibuatkan draft baru di sini
+// supaya progres tidak hilang bila user pindah halaman.
 func (h *FeedbackFormHandler) AISuggest(c echo.Context) error {
+	formID := c.FormValue("form_id")
 	prompt := c.FormValue("prompt")
 	lang := parseLanguage(c.FormValue("language"))
+	typeSpec, err := service.ParseSuggestTypeCounts(c.FormValue("type_counts"))
+	if err != nil {
+		return httperr.Write(c, httperr.NewBadRequest("INVALID_TYPE_COUNTS", err.Error()))
+	}
 	docs, err := readSuggestFiles(c)
 	if err != nil {
 		return httperr.Write(c, err)
 	}
-	res, err := h.ai.SuggestQuestions(c.Request().Context(), prompt, docs, lang)
+	var createdBy, createdByName *string
+	if formID == "" {
+		createdBy, createdByName = h.creatorFields(c)
+	}
+	f, err := h.svc.StartAISuggest(c.Request().Context(), formID, prompt, typeSpec, docs, lang, createdBy, createdByName)
 	if err != nil {
 		return httperr.Write(c, err)
 	}
-	return c.JSON(http.StatusOK, res)
+	return c.JSON(http.StatusAccepted, f)
+}
+
+// AISuggestClarify handles POST /api/feedback-forms/:id/ai/suggest/clarify —
+// user menjawab AIJob.ClarifyingQuestions, memicu putaran generate berikutnya.
+func (h *FeedbackFormHandler) AISuggestClarify(c echo.Context) error {
+	var req dto.FeedbackClarifyAnswersRequest
+	if err := c.Bind(&req); err != nil {
+		return httperr.Write(c, httperr.NewBadRequest("BIND_ERROR", "request tidak valid"))
+	}
+	f, err := h.svc.SubmitClarifyAnswers(c.Request().Context(), c.Param("id"), req.Answers)
+	if err != nil {
+		return httperr.Write(c, err)
+	}
+	return c.JSON(http.StatusAccepted, f)
+}
+
+// AISuggestClear handles POST /api/feedback-forms/:id/ai/suggest/clear —
+// membuang job saran AI yang sementara (dipanggil FE setelah user menambahkan
+// pertanyaan terpilih ke form, atau saat membatalkan alur klarifikasi).
+func (h *FeedbackFormHandler) AISuggestClear(c echo.Context) error {
+	f, err := h.svc.ClearAIJob(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return httperr.Write(c, err)
+	}
+	return c.JSON(http.StatusOK, f)
 }
 
 // AIRefine handles POST /api/feedback-forms/ai/refine — revisi 1 pertanyaan.
@@ -237,7 +286,7 @@ func (h *FeedbackFormHandler) AIRefine(c echo.Context) error {
 	if err := c.Validate(&req); err != nil {
 		return httperr.Write(c, err)
 	}
-	q := service.SuggestedQuestion{
+	q := domain.SuggestedQuestion{
 		Type:        domain.QuestionType(req.Question.Type),
 		Label:       req.Question.Label,
 		Description: req.Question.Description,

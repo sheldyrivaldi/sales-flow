@@ -3,12 +3,15 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
 	"salespilot/internal/domain"
+	"salespilot/internal/hermes"
 	"salespilot/internal/http/httperr"
 )
 
@@ -16,12 +19,21 @@ import (
 // menyusun pertanyaan, terbitkan link publik, terima jawaban client, dan
 // agregasi analitiknya. Menggantikan FeedbackService (form kaku 0023) sebagai
 // jalur utama; yang lama dibiarkan dorman untuk kompatibilitas link lama.
+//
+// Saran AI (StartAISuggest dkk di bawah) memakai model TITIP-TUGAS yang sama
+// dengan playbook/analisa event: runner+callbackBase+callbackSecret dipakai
+// fire-and-forget ke Hermes lewat /v1/agent-task, hasil dilaporkan balik lewat
+// callback (lihat CompleteAISuggest + internal/http/handlers/internal_handler.go).
+// nil-safe: runner nil → job langsung ditandai gagal, bukan diam-diam macet.
 type FeedbackFormService struct {
-	repo domain.FeedbackFormRepository
+	repo           domain.FeedbackFormRepository
+	runner         hermes.AgentTaskRunner
+	callbackBase   string
+	callbackSecret string
 }
 
-func NewFeedbackFormService(repo domain.FeedbackFormRepository) *FeedbackFormService {
-	return &FeedbackFormService{repo: repo}
+func NewFeedbackFormService(repo domain.FeedbackFormRepository, runner hermes.AgentTaskRunner, callbackBase, callbackSecret string) *FeedbackFormService {
+	return &FeedbackFormService{repo: repo, runner: runner, callbackBase: callbackBase, callbackSecret: callbackSecret}
 }
 
 var slugSanitize = regexp.MustCompile(`[^a-z0-9]+`)
@@ -158,7 +170,13 @@ func (s *FeedbackFormService) Update(ctx context.Context, id string, apply func(
 	// Menyimpan perubahan mengembalikan form ke draft: konten berubah maka link
 	// publik lama tidak boleh menyajikan versi baru sampai diterbitkan ulang
 	// (request: edit form terbit → status kembali draft, tombol Terbitkan muncul).
-	f.Status = domain.FormDraft
+	// KECUALI sedang ada job saran AI berjalan/menunggu klarifikasi — simpan
+	// draft biasa (mis. user mengedit pertanyaan lain sambil AI masih
+	// memproses di background) TIDAK BOLEH menjatuhkan status itu, karena
+	// CompleteAISuggest mengecek status ini persis untuk menerapkan hasilnya.
+	if f.Status != domain.FormProcessingAI && f.Status != domain.FormNeedClarification {
+		f.Status = domain.FormDraft
+	}
 	if strings.TrimSpace(desiredSlug) != "" {
 		slug, err := s.uniqueSlug(ctx, desiredSlug, f.Title, f.Slug)
 		if err != nil {
@@ -193,6 +211,338 @@ func (s *FeedbackFormService) Publish(ctx context.Context, id string) (*domain.F
 
 func (s *FeedbackFormService) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
+}
+
+// --- Saran AI (async, model titip-tugas) ---
+
+// deriveFormTitle mengambil judul ringkas dari prompt AI — dipakai saat user
+// langsung minta saran AI dari form yang belum punya judul sama sekali
+// (form baru dibuat otomatis di sini demi persistensi; judulnya akan ditimpa
+// begitu user mengisi kolom judul dan menyimpan draft seperti biasa).
+func deriveFormTitle(prompt string) string {
+	t := strings.TrimSpace(prompt)
+	if i := strings.IndexAny(t, "\n."); i > 0 {
+		t = t[:i]
+	}
+	t = strings.TrimSpace(t)
+	if len(t) > 80 {
+		t = t[:80] + "…"
+	}
+	if t == "" {
+		return "Form Feedback (draft)"
+	}
+	return t
+}
+
+// StartAISuggest memulai permintaan saran AI. formID kosong berarti form
+// BELUM tersimpan — dibuatkan draft baru di sini SEBELUM apa pun lain
+// terjadi, supaya progres tidak hilang bila user pindah halaman (generate
+// bisa makan waktu lama). Prompt yang jelas-jelas terlalu tipis ditangani
+// deterministik (langsung need_clarification) tanpa memanggil AI sama
+// sekali; selebihnya instruksi dititipkan ke Hermes fire-and-forget dan
+// hasilnya diterapkan lewat CompleteAISuggest saat callback tiba.
+func (s *FeedbackFormService) StartAISuggest(
+	ctx context.Context,
+	formID, prompt string,
+	typeSpec map[domain.QuestionType]TypeCountSpec,
+	files []hermes.AgentDocument,
+	lang domain.FormLanguage,
+	createdBy, createdByName *string,
+) (*domain.FeedbackForm, error) {
+	if !lang.Valid() {
+		lang = domain.LangID
+	}
+
+	isNew := formID == ""
+	var f *domain.FeedbackForm
+	if !isNew {
+		existing, err := s.repo.GetByID(ctx, formID)
+		if err != nil {
+			return nil, err
+		}
+		if existing == nil {
+			return nil, httperr.NewNotFound("form feedback tidak ditemukan")
+		}
+		if existing.Status == domain.FormProcessingAI {
+			return nil, httperr.NewBadRequest("AI_BUSY", "AI sedang memproses form ini, tunggu sampai selesai")
+		}
+		f = existing
+	} else {
+		f = &domain.FeedbackForm{
+			Title:         deriveFormTitle(prompt),
+			CollectEmail:  true,
+			Language:      lang,
+			Status:        domain.FormDraft,
+			Questions:     []domain.FeedbackQuestion{},
+			CreatedBy:     createdBy,
+			CreatedByName: createdByName,
+		}
+	}
+
+	job := &domain.FeedbackAIJob{
+		Prompt:     prompt,
+		Language:   lang,
+		Round:      0,
+		TypeCounts: typeCountsToStrings(typeSpec),
+		UpdatedAt:  time.Now(),
+	}
+
+	// Prompt terlalu tipis (tanpa lampiran) — LLM cenderung terlalu percaya
+	// diri saat menilai confidence sendiri, jadi kasus ini ditangani pasti di
+	// sini, bukan diserahkan ke penilaian model (lihat looksTooVagueForSuggest).
+	if looksTooVagueForSuggest(prompt, len(files) > 0) {
+		job.Confidence = 40
+		job.ClarifyingQuestions = defaultClarifyingQuestions(lang)
+		f.AIJob = job
+		f.Status = domain.FormNeedClarification
+		if err := s.persistAIJobForm(ctx, isNew, f); err != nil {
+			return nil, err
+		}
+		return f, nil
+	}
+
+	f.AIJob = job
+	f.Status = domain.FormProcessingAI
+	if err := s.persistAIJobForm(ctx, isNew, f); err != nil {
+		return nil, err
+	}
+
+	instruction := buildSuggestPrompt(prompt, lang, typeSpec)
+	go s.dispatchAISuggest(f.ID, instruction, files)
+	return f, nil
+}
+
+// persistAIJobForm creates a brand-new form (isNew) or updates an existing
+// one — every AI-job transition goes through here so callers don't branch.
+func (s *FeedbackFormService) persistAIJobForm(ctx context.Context, isNew bool, f *domain.FeedbackForm) error {
+	if isNew {
+		slug, err := s.uniqueSlug(ctx, "", f.Title, "")
+		if err != nil {
+			return err
+		}
+		f.Slug = slug
+		return s.repo.Create(ctx, f)
+	}
+	return s.repo.Update(ctx, f)
+}
+
+// dispatchAISuggest menitipkan instruksi + lampiran ke Hermes (fire-and-forget,
+// TIDAK memakai context request — request sudah selesai & sudah balas ke FE).
+// Hasil dilaporkan balik lewat callback (CompleteAISuggest).
+func (s *FeedbackFormService) dispatchAISuggest(formID, instruction string, docs []hermes.AgentDocument) {
+	if s.runner == nil {
+		s.markAISuggestFailed(formID, "AI agent tidak dikonfigurasi.")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	task := hermes.AgentTask{
+		Instruction:    instruction,
+		JobID:          formID,
+		CallbackURL:    fmt.Sprintf("%s/internal/feedback-forms/%s/ai-suggest-complete", strings.TrimRight(s.callbackBase, "/"), formID),
+		CallbackSecret: s.callbackSecret,
+		Documents:      docs,
+	}
+	if err := s.runner.RunAgentTask(ctx, task); err != nil {
+		log.Printf("feedback ai suggest %s: gagal menitipkan tugas ke AI: %v", formID, err)
+		s.markAISuggestFailed(formID, "Gagal mengirim tugas ke AI. Coba lagi.")
+	}
+}
+
+// markAISuggestFailed menandai job gagal HANYA bila form masih processing_ai
+// (jangan menimpa hasil yang mungkin sudah dilaporkan lebih dulu, atau job
+// yang sudah dibatalkan user — race yang sangat jarang, sama seperti playbook).
+func (s *FeedbackFormService) markAISuggestFailed(formID, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	f, err := s.repo.GetByID(ctx, formID)
+	if err != nil || f == nil || f.Status != domain.FormProcessingAI {
+		return
+	}
+	f.Status = domain.FormDraft
+	if f.AIJob == nil {
+		f.AIJob = &domain.FeedbackAIJob{}
+	}
+	f.AIJob.Error = reason
+	f.AIJob.ClarifyingQuestions = nil
+	f.AIJob.PendingQuestions = nil
+	f.AIJob.UpdatedAt = time.Now()
+	_ = s.repo.Update(ctx, f)
+}
+
+// CompleteAISuggest dipanggil callback bridge saat generate selesai (sukses
+// atau gagal) — content kosong berarti gagal (errMsg berisi alasan). Bila
+// form sudah tidak lagi processing_ai (dibatalkan user, atau callback
+// duplikat), hasil diabaikan begitu saja alih-alih menimpa state yang lebih
+// baru.
+func (s *FeedbackFormService) CompleteAISuggest(ctx context.Context, formID string, content []byte, errMsg string) error {
+	f, err := s.repo.GetByID(ctx, formID)
+	if err != nil {
+		return err
+	}
+	if f == nil {
+		return httperr.NewNotFound("form feedback tidak ditemukan")
+	}
+	if f.Status != domain.FormProcessingAI {
+		return nil
+	}
+	if f.AIJob == nil {
+		f.AIJob = &domain.FeedbackAIJob{}
+	}
+	f.AIJob.UpdatedAt = time.Now()
+
+	if len(content) == 0 {
+		if errMsg == "" {
+			errMsg = "Generate saran AI gagal."
+		}
+		f.Status = domain.FormDraft
+		f.AIJob.Error = errMsg
+		f.AIJob.ClarifyingQuestions = nil
+		f.AIJob.PendingQuestions = nil
+		return s.repo.Update(ctx, f)
+	}
+
+	confidence, clarify, questions, perr := evaluateSuggestJSON(content)
+	if perr != nil {
+		f.Status = domain.FormDraft
+		f.AIJob.Error = "Output AI tidak valid."
+		f.AIJob.ClarifyingQuestions = nil
+		f.AIJob.PendingQuestions = nil
+		return s.repo.Update(ctx, f)
+	}
+
+	f.AIJob.Confidence = confidence
+	f.AIJob.Error = ""
+	if len(clarify) > 0 {
+		f.Status = domain.FormNeedClarification
+		f.AIJob.ClarifyingQuestions = clarify
+		f.AIJob.PendingQuestions = nil
+	} else {
+		f.Status = domain.FormDraft
+		f.AIJob.ClarifyingQuestions = nil
+		f.AIJob.PendingQuestions = questions
+	}
+	return s.repo.Update(ctx, f)
+}
+
+// SubmitClarifyAnswers menerima jawaban user atas AIJob.ClarifyingQuestions,
+// menambahkannya ke riwayat, lalu menitipkan ULANG instruksi ke Hermes dengan
+// konteks yang sudah diperjelas. Dibatasi maxClarifyRounds putaran — pada
+// putaran terakhir AI dipaksa menyusun kuesioner terbaik dari info yang ada
+// alih-alih terus bertanya.
+func (s *FeedbackFormService) SubmitClarifyAnswers(ctx context.Context, formID string, answers []string) (*domain.FeedbackForm, error) {
+	f, err := s.repo.GetByID(ctx, formID)
+	if err != nil {
+		return nil, err
+	}
+	if f == nil {
+		return nil, httperr.NewNotFound("form feedback tidak ditemukan")
+	}
+	if f.AIJob == nil || len(f.AIJob.ClarifyingQuestions) == 0 || f.Status != domain.FormNeedClarification {
+		return nil, httperr.NewBadRequest("NO_CLARIFICATION", "tidak ada pertanyaan klarifikasi yang menunggu jawaban")
+	}
+
+	for i, q := range f.AIJob.ClarifyingQuestions {
+		a := "(tidak dijawab)"
+		if i < len(answers) {
+			if t := strings.TrimSpace(answers[i]); t != "" {
+				a = t
+			}
+		}
+		f.AIJob.QAHistory = append(f.AIJob.QAHistory, domain.FeedbackClarifyQA{Question: q, Answer: a})
+	}
+	nextRound := f.AIJob.Round + 1
+	forceFinal := nextRound >= maxClarifyRounds
+
+	f.AIJob.Round = nextRound
+	f.AIJob.ClarifyingQuestions = nil
+	f.AIJob.Confidence = 0
+	f.AIJob.Error = ""
+	f.AIJob.UpdatedAt = time.Now()
+	f.Status = domain.FormProcessingAI
+	if err := s.repo.Update(ctx, f); err != nil {
+		return nil, err
+	}
+
+	effectivePrompt := composeClarifyPrompt(f.AIJob.Prompt, f.AIJob.QAHistory, forceFinal)
+	typeSpec := typeCountsFromStrings(f.AIJob.TypeCounts)
+	instruction := buildSuggestPrompt(effectivePrompt, f.AIJob.Language, typeSpec)
+	// Lampiran TIDAK diulang di putaran klarifikasi: berkas mentah sengaja
+	// tidak disimpan di job (JSONB, bukan tempat untuk blob biner) — riwayat
+	// tanya-jawab dianggap cukup memperjelas konteks pada putaran lanjutan.
+	go s.dispatchAISuggest(f.ID, instruction, nil)
+	return f, nil
+}
+
+// composeClarifyPrompt menyusun ulang prompt dengan riwayat tanya-jawab
+// terlampir, supaya AI tidak kehilangan konteks dari putaran sebelumnya.
+func composeClarifyPrompt(prompt string, history []domain.FeedbackClarifyQA, forceFinal bool) string {
+	var b strings.Builder
+	b.WriteString(strings.TrimSpace(prompt))
+	if len(history) > 0 {
+		b.WriteString("\n\nJawaban klarifikasi dari user:\n")
+		for _, h := range history {
+			fmt.Fprintf(&b, "- %s\n  Jawaban: %s\n", h.Question, h.Answer)
+		}
+	}
+	if forceFinal {
+		b.WriteString("\n(Putaran klarifikasi sudah maksimal. Tetap susun pertanyaan terbaik dari info yang tersedia, JANGAN minta klarifikasi lagi.)")
+	}
+	return b.String()
+}
+
+// ClearAIJob membuang job AI yang sementara secara bisnis — dipanggil SETELAH
+// user memilih pertanyaan yang mau ditambahkan ke form (FE menambahkannya ke
+// state lokal lalu memanggil ini untuk bersih-bersih), ATAU saat user
+// membatalkan alur klarifikasi. Form kembali ke draft bila statusnya masih
+// processing_ai/need_clarification.
+func (s *FeedbackFormService) ClearAIJob(ctx context.Context, formID string) (*domain.FeedbackForm, error) {
+	f, err := s.repo.GetByID(ctx, formID)
+	if err != nil {
+		return nil, err
+	}
+	if f == nil {
+		return nil, httperr.NewNotFound("form feedback tidak ditemukan")
+	}
+	f.AIJob = nil
+	if f.Status == domain.FormProcessingAI || f.Status == domain.FormNeedClarification {
+		f.Status = domain.FormDraft
+	}
+	if err := s.repo.Update(ctx, f); err != nil {
+		return nil, err
+	}
+	return f, nil
+}
+
+// ReapStaleAISuggest menandai job saran AI yang mandek (processing_ai lebih
+// lama dari olderThan) sebagai gagal — jaring pengaman bila Hermes tak pernah
+// melapor balik. Dipanggil berkala via ticker, dan sekali di boot dengan
+// olderThan=0 untuk menyapu job yang terputus saat server restart (goroutine
+// dispatch tidak selamat dari restart, beda dari state di DB).
+func (s *FeedbackFormService) ReapStaleAISuggest(ctx context.Context, olderThan time.Duration) error {
+	forms, err := s.repo.List(ctx)
+	if err != nil {
+		return err
+	}
+	cutoff := time.Now().Add(-olderThan)
+	for i := range forms {
+		f := forms[i]
+		if f.Status != domain.FormProcessingAI || f.UpdatedAt.After(cutoff) {
+			continue
+		}
+		f.Status = domain.FormDraft
+		if f.AIJob == nil {
+			f.AIJob = &domain.FeedbackAIJob{}
+		}
+		f.AIJob.Error = "Waktu habis menunggu AI menyelesaikan saran. Coba lagi."
+		f.AIJob.ClarifyingQuestions = nil
+		f.AIJob.PendingQuestions = nil
+		f.AIJob.UpdatedAt = time.Now()
+		if err := s.repo.Update(ctx, &f); err != nil {
+			log.Printf("feedback ai suggest reaper: gagal menandai form %s: %v", f.ID, err)
+		}
+	}
+	return nil
 }
 
 func (s *FeedbackFormService) Get(ctx context.Context, id string) (*domain.FeedbackForm, error) {

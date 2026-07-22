@@ -19,9 +19,40 @@ export interface FeedbackQuestion {
   max_label?: string
 }
 
-export type FeedbackFormStatus = 'draft' | 'published' | 'closed'
+// processing_ai/need_clarification: saran AI async sedang berjalan/menunggu
+// jawaban klarifikasi — lihat FeedbackAIJob. Form kembali ke draft begitu
+// selesai (sukses maupun gagal).
+export type FeedbackFormStatus = 'draft' | 'published' | 'closed' | 'processing_ai' | 'need_clarification'
 
 export type FormLanguage = 'id' | 'en'
+
+/** Satu pasang tanya-jawab klarifikasi (AI bertanya ke USER, bukan responden). */
+export interface ClarifyQA {
+  question: string
+  answer: string
+}
+
+/**
+ * Job saran AI async yang SEMENTARA secara bisnis (dibuang begitu user
+ * menambahkan pilihannya ke form, atau membatalkan) tapi PERSISTEN secara
+ * teknis — generate bisa makan waktu lama, jadi progres tidak boleh hilang
+ * hanya karena user pindah halaman. Dipoll lewat useFeedbackForm selama
+ * status form processing_ai.
+ */
+export interface FeedbackAIJob {
+  prompt: string
+  language: FormLanguage
+  round: number
+  qa_history: ClarifyQA[]
+  /** Konfigurasi tipe & jumlah pertanyaan dari user (opsional). Nilai per key:
+   * "random" atau angka dalam bentuk string. */
+  type_counts?: Partial<Record<QuestionType, string>>
+  confidence: number
+  clarifying_questions: string[]
+  pending_questions: SuggestedQuestion[]
+  error: string
+  updated_at: string
+}
 
 export interface FeedbackForm {
   id: string
@@ -38,6 +69,7 @@ export interface FeedbackForm {
   created_at: string
   updated_at: string
   submission_count: number
+  ai_job?: FeedbackAIJob | null
 }
 
 export interface FeedbackAnswer {
@@ -88,10 +120,11 @@ export interface SuggestedQuestion {
   max_label?: string
 }
 
-export interface SuggestResult {
-  questions: SuggestedQuestion[]
-  degraded: boolean
-}
+/** Konfigurasi jumlah pertanyaan per tipe yang dikirim ke ai/suggest — nilai
+ * 'random' berarti AI bebas menentukan jumlahnya (minimal 1), 0 berarti tipe
+ * itu dikecualikan, N berarti persis N pertanyaan. Key yang tidak disertakan
+ * berarti bebas ditentukan AI. */
+export type TypeCountsInput = Partial<Record<QuestionType, number | 'random'>>
 
 export interface RefineResult {
   question: SuggestedQuestion
@@ -145,6 +178,12 @@ export function useFeedbackForm(id: string | undefined) {
     queryKey: ['feedback-form', id],
     queryFn: () => apiFetch<FeedbackForm>(`/api/feedback-forms/${id}`),
     enabled: !!id,
+    // Poll selagi job saran AI async berjalan di background, supaya progres
+    // (dan hasilnya) tampil tanpa perlu reload manual — lihat FeedbackAIJob.
+    refetchInterval: (query) => {
+      const data = query.state.data as FeedbackForm | undefined
+      return data?.status === 'processing_ai' ? 3000 : false
+    },
   })
 }
 
@@ -216,24 +255,65 @@ export function useDeleteFeedbackForm() {
   })
 }
 
-// AI: minta saran pertanyaan (multipart: prompt + bahasa + banyak lampiran opsional).
+// AI: minta saran pertanyaan (multipart: prompt + bahasa + tipe/jumlah opsional
+// + banyak lampiran opsional). ASINKRON: form disimpan seketika dengan status
+// processing_ai/need_clarification dan dikembalikan langsung — hasil
+// sebenarnya datang lewat polling useFeedbackForm (lihat ai_job pada form).
+// form_id kosong berarti form belum tersimpan — dibuatkan draft baru di
+// server, dan id-nya HARUS diadopsi oleh caller (mis. builder mengganti URL)
+// supaya penyimpanan berikutnya mengedit baris yang sama, bukan membuat baru.
 export function useSuggestQuestions() {
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: async ({
+      formId,
       prompt,
       files,
       language,
+      typeCounts,
     }: {
+      formId?: string
       prompt: string
       files?: File[]
       language: FormLanguage
+      typeCounts?: TypeCountsInput
     }) => {
       const fd = new FormData()
+      if (formId) fd.append('form_id', formId)
       fd.append('prompt', prompt)
       fd.append('language', language)
+      if (typeCounts && Object.keys(typeCounts).length > 0) fd.append('type_counts', JSON.stringify(typeCounts))
       for (const f of files ?? []) fd.append('files', f)
-      return apiFetch<SuggestResult>('/api/feedback-forms/ai/suggest', { method: 'POST', body: fd })
+      return apiFetch<FeedbackForm>('/api/feedback-forms/ai/suggest', { method: 'POST', body: fd })
     },
+    onSuccess: (form) => {
+      qc.setQueryData(['feedback-form', form.id], form)
+      void qc.invalidateQueries({ queryKey: ['feedback-forms'] })
+    },
+  })
+}
+
+// AI: jawab pertanyaan klarifikasi — memicu putaran generate berikutnya.
+export function useSubmitClarifyAnswers() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ formId, answers }: { formId: string; answers: string[] }) =>
+      apiFetch<FeedbackForm>(`/api/feedback-forms/${formId}/ai/suggest/clarify`, {
+        method: 'POST',
+        body: JSON.stringify({ answers }),
+      }),
+    onSuccess: (form) => qc.setQueryData(['feedback-form', form.id], form),
+  })
+}
+
+// AI: bersihkan job saran yang sementara — dipanggil setelah pertanyaan
+// terpilih ditambahkan ke form, atau saat membatalkan alur klarifikasi.
+export function useClearAIJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (formId: string) =>
+      apiFetch<FeedbackForm>(`/api/feedback-forms/${formId}/ai/suggest/clear`, { method: 'POST' }),
+    onSuccess: (form) => qc.setQueryData(['feedback-form', form.id], form),
   })
 }
 

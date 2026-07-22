@@ -190,11 +190,27 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	feedbackSvc := service.NewFeedbackService(feedbackRepo)
 	feedbackH := handlers.NewFeedbackHandler(feedbackSvc)
 
+	// AgentTaskRunner (model titip-tugas fire-and-forget) — dihitung di sini
+	// (bukan di dekat playbook di bawah) karena Feedback Client's saran AI
+	// asinkron butuh ini lebih dulu.
+	var agentRunner hermes.AgentTaskRunner
+	if r, ok := hc.(hermes.AgentTaskRunner); ok {
+		agentRunner = r
+	}
+
 	// Feedback Client dinamis (form builder ala Google Form + bantuan AI) —
 	// menggantikan form kaku 0023 sebagai jalur utama; yang lama dibiarkan
-	// dorman (routes /feedback di bawah) demi kompatibilitas link lama.
+	// dorman (routes /feedback di bawah) demi kompatibilitas link lama. Saran
+	// AI (susun kuesioner) memakai model titip-tugas ASINKRON yang sama dengan
+	// playbook/analisa event — lihat feedback_form_service.go.
 	feedbackFormRepo := repository.NewFeedbackFormRepo(db)
-	feedbackFormSvc := service.NewFeedbackFormService(feedbackFormRepo)
+	// Job yang masih processing_ai saat server restart tak akan pernah
+	// dilapor balik (goroutine dispatch tidak selamat dari restart) — tandai
+	// gagal sekali di boot, sama seperti playbookJobRepo.FailInterrupted.
+	feedbackFormSvc := service.NewFeedbackFormService(feedbackFormRepo, agentRunner, cfg.InternalAPIBaseURL, cfg.CronTriggerSecret)
+	if err := feedbackFormSvc.ReapStaleAISuggest(context.Background(), 0); err != nil {
+		log.Printf("feedback ai suggest: gagal menyapu job terputus: %v", err)
+	}
 	feedbackAISvc := service.NewFeedbackAIService(hc, hermes.SessionKey(cfg.WorkspaceSessionKey))
 	feedbackFormH := handlers.NewFeedbackFormHandler(feedbackFormSvc, feedbackAISvc, userRepo)
 
@@ -248,10 +264,8 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	if err := playbookJobRepo.FailInterrupted(context.Background()); err != nil {
 		log.Printf("playbook jobs: gagal menyapu job terputus: %v", err)
 	}
-	var agentRunner hermes.AgentTaskRunner
-	if r, ok := hc.(hermes.AgentTaskRunner); ok {
-		agentRunner = r
-	}
+	// agentRunner sudah dihitung di atas (dipakai lebih dulu oleh Feedback
+	// Client's saran AI asinkron).
 	// attachmentReader dibagi ke playbook (lampiran event → dokumen konteks) dan
 	// Analisa AI, keduanya membaca berkas event dari UploadDir yang sama.
 	attachmentReader := handlers.NewEventAttachmentReader(cfg.UploadDir)
@@ -282,6 +296,11 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 			if err := eventAnalysisSvc.ReapStale(rctx, 40*time.Minute); err != nil {
 				log.Printf("event analysis reaper: %v", err)
 			}
+			// Saran AI Feedback Client memakai jalur asinkron yang sama —
+			// jaring pengaman yang sama juga (lihat ReapStaleAISuggest).
+			if err := feedbackFormSvc.ReapStaleAISuggest(rctx, 40*time.Minute); err != nil {
+				log.Printf("feedback ai suggest reaper: %v", err)
+			}
 			cancel()
 		}
 	}()
@@ -310,7 +329,7 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	// constructed Scheduler would let their period-bucketed idempotency
 	// keys and DiscoveryService instances drift apart.
 	scheduler := ai.NewScheduler(profileSvc, discoverySvc, schedulerTickInterval)
-	internalH := handlers.NewInternalHandler(scheduler, cfg.CronTriggerSecret, playbookJobSvc, eventAnalysisSvc)
+	internalH := handlers.NewInternalHandler(scheduler, cfg.CronTriggerSecret, playbookJobSvc, eventAnalysisSvc, feedbackFormSvc)
 
 	// Admin Hermes TUI (native Hermes CLI/TUI over a browser terminal,
 	// proxied to the hermes-tui/ttyd sidecar) — feature degrades to simply
@@ -345,6 +364,7 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	// Callback bridge saat playbook selesai (fire-and-forget model).
 	e.POST("/internal/playbook-jobs/:id/complete", internalH.CompletePlaybookJob)
 	e.POST("/internal/events/:id/analysis-complete", internalH.CompleteEventAnalysis)
+	e.POST("/internal/feedback-forms/:id/ai-suggest-complete", internalH.CompleteFeedbackAISuggest)
 
 	api := e.Group("/api")
 
@@ -476,6 +496,10 @@ func New(cfg *config.Config, db *gorm.DB, hc hermes.Client) (*echo.Echo, *servic
 	feedbackForms.POST("/:id/publish", feedbackFormH.Publish)
 	feedbackForms.GET("/:id/submissions", feedbackFormH.Submissions)
 	feedbackForms.GET("/:id/analytics", feedbackFormH.Analytics)
+	// Saran AI async: jawab klarifikasi (memicu putaran berikutnya) & bersihkan
+	// job sementara (setelah dipilih/ditambahkan, atau dibatalkan).
+	feedbackForms.POST("/:id/ai/suggest/clarify", feedbackFormH.AISuggestClarify)
+	feedbackForms.POST("/:id/ai/suggest/clear", feedbackFormH.AISuggestClear)
 
 	events := authd.Group("/events", auth.RequireCapability(auth.CapCRUDData))
 	events.GET("", eventH.List)

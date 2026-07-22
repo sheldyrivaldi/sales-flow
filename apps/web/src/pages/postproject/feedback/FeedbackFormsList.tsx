@@ -12,6 +12,7 @@ import ConfirmDialog from '../../../components/ui/ConfirmDialog'
 import Skeleton from '../../../components/ui/Skeleton'
 import { toast } from '../../../lib/toast'
 import { formatTanggal } from '../../../lib/format'
+import { copyToClipboard } from '../../../lib/clipboard'
 import {
   useFeedbackForms,
   useDeleteFeedbackForm,
@@ -24,6 +25,8 @@ const STATUS: Record<FeedbackFormStatus, { label: string; tone: Tone; solid?: bo
   draft: { label: 'Draft', tone: 'info' },
   published: { label: 'Terbit', tone: 'success', solid: true },
   closed: { label: 'Ditutup', tone: 'warning' },
+  processing_ai: { label: 'AI Memproses…', tone: 'accent' },
+  need_clarification: { label: 'Perlu Klarifikasi', tone: 'warning', solid: true },
 }
 
 const LANG: Record<FormLanguage, string> = {
@@ -42,10 +45,10 @@ export default function FeedbackFormsList() {
   const [deleteTarget, setDeleteTarget] = useState<FeedbackForm | null>(null)
 
   function copyLink(form: FeedbackForm) {
-    navigator.clipboard.writeText(publicFormLink(form.slug)).then(
-      () => toast.success('Link form disalin.'),
-      () => toast.error('Gagal menyalin link.'),
-    )
+    void copyToClipboard(publicFormLink(form.slug)).then((ok) => {
+      if (ok) toast.success('Link form disalin.')
+      else toast.error('Gagal menyalin link.')
+    })
   }
 
   async function handleDuplicate(form: FeedbackForm) {

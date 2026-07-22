@@ -110,7 +110,7 @@ func ptrStr(s string) *string { return &s }
 
 func TestFeedbackForm_Create_SlugifyAndUnique(t *testing.T) {
 	repo := newFakeFeedbackFormRepo()
-	svc := NewFeedbackFormService(repo)
+	svc := NewFeedbackFormService(repo, nil, "", "")
 	ctx := context.Background()
 
 	q := []domain.FeedbackQuestion{{Type: domain.QuestionRating, Label: "Kepuasan"}}
@@ -151,7 +151,7 @@ func TestFeedbackForm_Create_SlugifyAndUnique(t *testing.T) {
 
 func TestFeedbackForm_Create_RejectsChoiceWithoutOptions(t *testing.T) {
 	repo := newFakeFeedbackFormRepo()
-	svc := NewFeedbackFormService(repo)
+	svc := NewFeedbackFormService(repo, nil, "", "")
 	_, err := svc.Create(context.Background(), &domain.FeedbackForm{
 		Title:     "Bad",
 		Questions: []domain.FeedbackQuestion{{Type: domain.QuestionChoice, Label: "Pilih"}},
@@ -163,7 +163,7 @@ func TestFeedbackForm_Create_RejectsChoiceWithoutOptions(t *testing.T) {
 
 func TestFeedbackForm_Publish_RequiresQuestions(t *testing.T) {
 	repo := newFakeFeedbackFormRepo()
-	svc := NewFeedbackFormService(repo)
+	svc := NewFeedbackFormService(repo, nil, "", "")
 	ctx := context.Background()
 	f, _ := svc.Create(ctx, &domain.FeedbackForm{Title: "Kosong"}, "")
 	if _, err := svc.Publish(ctx, f.ID); err == nil {
@@ -194,7 +194,7 @@ func setupPublishedForm(t *testing.T, svc *FeedbackFormService) *domain.Feedback
 
 func TestFeedbackForm_Submit_Validations(t *testing.T) {
 	repo := newFakeFeedbackFormRepo()
-	svc := NewFeedbackFormService(repo)
+	svc := NewFeedbackFormService(repo, nil, "", "")
 	ctx := context.Background()
 	f := setupPublishedForm(t, svc)
 
@@ -271,7 +271,7 @@ func TestFeedbackForm_Submit_Validations(t *testing.T) {
 
 func TestFeedbackForm_PublicGet_OnlyPublished(t *testing.T) {
 	repo := newFakeFeedbackFormRepo()
-	svc := NewFeedbackFormService(repo)
+	svc := NewFeedbackFormService(repo, nil, "", "")
 	ctx := context.Background()
 	f, _ := svc.Create(ctx, &domain.FeedbackForm{
 		Title:     "Draft",
@@ -287,7 +287,7 @@ func TestFeedbackForm_PublicGet_OnlyPublished(t *testing.T) {
 
 func TestFeedbackForm_Analytics_Aggregates(t *testing.T) {
 	repo := newFakeFeedbackFormRepo()
-	svc := NewFeedbackFormService(repo)
+	svc := NewFeedbackFormService(repo, nil, "", "")
 	ctx := context.Background()
 	f := setupPublishedForm(t, svc)
 
@@ -335,6 +335,250 @@ func TestFeedbackForm_Analytics_Aggregates(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("statistik r1 tidak ditemukan")
+	}
+}
+
+// --- Saran AI async ---
+
+func TestFeedbackForm_StartAISuggest_VaguePromptNeedsClarificationWithoutDispatch(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	// runner nil sengaja: prompt tipis TIDAK BOLEH memicu dispatch sama
+	// sekali, jadi runner yang nil pun tidak boleh menyebabkan masalah.
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+
+	f, err := svc.StartAISuggest(ctx, "", "buatkan feedback", nil, nil, domain.LangID, nil, nil)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if f.Status != domain.FormNeedClarification {
+		t.Fatalf("status = %q, want need_clarification", f.Status)
+	}
+	if f.AIJob == nil || len(f.AIJob.ClarifyingQuestions) == 0 {
+		t.Fatalf("ai_job harus berisi clarifying_questions: %+v", f.AIJob)
+	}
+	if f.ID == "" || f.Slug == "" {
+		t.Fatal("form baru harus langsung tersimpan (ID + slug terisi)")
+	}
+}
+
+func TestFeedbackForm_StartAISuggest_DescriptivePromptGoesProcessing(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+
+	f, err := svc.StartAISuggest(ctx, "", "ukur kepuasan client proyek migrasi ERP", nil, nil, domain.LangID, nil, nil)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if f.Status != domain.FormProcessingAI {
+		t.Fatalf("status = %q, want processing_ai", f.Status)
+	}
+	if f.AIJob == nil || f.AIJob.Prompt != "ukur kepuasan client proyek migrasi ERP" {
+		t.Fatalf("ai_job.prompt tidak tersimpan: %+v", f.AIJob)
+	}
+}
+
+func TestFeedbackForm_StartAISuggest_RejectsWhenAlreadyProcessing(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+
+	f, err := svc.StartAISuggest(ctx, "", "ukur kepuasan client proyek migrasi ERP", nil, nil, domain.LangID, nil, nil)
+	if err != nil {
+		t.Fatalf("start pertama: %v", err)
+	}
+	if _, err := svc.StartAISuggest(ctx, f.ID, "prompt lain yang juga deskriptif", nil, nil, domain.LangID, nil, nil); err == nil {
+		t.Fatal("harus ditolak selagi form masih processing_ai")
+	}
+}
+
+func TestFeedbackForm_CompleteAISuggest_AppliesQuestionsOnHighConfidence(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+
+	f, err := svc.StartAISuggest(ctx, "", "ukur kepuasan client proyek migrasi ERP", nil, nil, domain.LangID, nil, nil)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	content := []byte(`{"confidence":92,"questions":[{"type":"text","label":"Saran perbaikan"}]}`)
+	if err := svc.CompleteAISuggest(ctx, f.ID, content, ""); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+
+	got, err := repo.GetByID(ctx, f.ID)
+	if err != nil || got == nil {
+		t.Fatalf("get after complete: %v", err)
+	}
+	if got.Status != domain.FormDraft {
+		t.Fatalf("status = %q, want draft", got.Status)
+	}
+	if got.AIJob == nil || len(got.AIJob.PendingQuestions) != 1 {
+		t.Fatalf("pending_questions harus terisi 1: %+v", got.AIJob)
+	}
+}
+
+func TestFeedbackForm_CompleteAISuggest_LowConfidenceNeedsClarification(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+
+	f, _ := svc.StartAISuggest(ctx, "", "ukur kepuasan client proyek migrasi ERP", nil, nil, domain.LangID, nil, nil)
+	content := []byte(`{"confidence":30,"clarifying_questions":["Untuk divisi apa?"],"questions":[]}`)
+	if err := svc.CompleteAISuggest(ctx, f.ID, content, ""); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	got, _ := repo.GetByID(ctx, f.ID)
+	if got.Status != domain.FormNeedClarification {
+		t.Fatalf("status = %q, want need_clarification", got.Status)
+	}
+	if len(got.AIJob.ClarifyingQuestions) != 1 {
+		t.Fatalf("clarifying_questions = %+v", got.AIJob.ClarifyingQuestions)
+	}
+}
+
+func TestFeedbackForm_CompleteAISuggest_FailureRevertsToDraftWithError(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+
+	f, _ := svc.StartAISuggest(ctx, "", "ukur kepuasan client proyek migrasi ERP", nil, nil, domain.LangID, nil, nil)
+	if err := svc.CompleteAISuggest(ctx, f.ID, nil, "Provider gagal"); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	got, _ := repo.GetByID(ctx, f.ID)
+	if got.Status != domain.FormDraft {
+		t.Fatalf("status = %q, want draft", got.Status)
+	}
+	if got.AIJob == nil || got.AIJob.Error != "Provider gagal" {
+		t.Fatalf("ai_job.error tidak tersimpan: %+v", got.AIJob)
+	}
+}
+
+func TestFeedbackForm_CompleteAISuggest_IgnoresStaleCallback(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+
+	f, _ := svc.StartAISuggest(ctx, "", "ukur kepuasan client proyek migrasi ERP", nil, nil, domain.LangID, nil, nil)
+	// User membatalkan sebelum callback tiba — status sudah bukan processing_ai lagi.
+	if _, err := svc.ClearAIJob(ctx, f.ID); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	content := []byte(`{"confidence":92,"questions":[{"type":"text","label":"Terlambat"}]}`)
+	if err := svc.CompleteAISuggest(ctx, f.ID, content, ""); err != nil {
+		t.Fatalf("complete: %v", err)
+	}
+	got, _ := repo.GetByID(ctx, f.ID)
+	if got.AIJob != nil {
+		t.Fatalf("callback basi tidak boleh mengisi ulang ai_job: %+v", got.AIJob)
+	}
+}
+
+func TestFeedbackForm_SubmitClarifyAnswers_TracksRoundAndHistory(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+
+	f, _ := svc.StartAISuggest(ctx, "", "buatkan feedback", nil, nil, domain.LangID, nil, nil)
+	if f.Status != domain.FormNeedClarification {
+		t.Fatalf("prasyarat: status = %q, want need_clarification", f.Status)
+	}
+	nQuestions := len(f.AIJob.ClarifyingQuestions)
+	answers := make([]string, nQuestions)
+	for i := range answers {
+		answers[i] = "Jawaban " + string(rune('A'+i))
+	}
+	answered, err := svc.SubmitClarifyAnswers(ctx, f.ID, answers)
+	if err != nil {
+		t.Fatalf("submit clarify: %v", err)
+	}
+	if answered.Status != domain.FormProcessingAI {
+		t.Fatalf("status = %q, want processing_ai setelah menjawab", answered.Status)
+	}
+	if answered.AIJob.Round != 1 {
+		t.Fatalf("round = %d, want 1", answered.AIJob.Round)
+	}
+	if len(answered.AIJob.QAHistory) != nQuestions {
+		t.Fatalf("qa_history = %d, want %d: %+v", len(answered.AIJob.QAHistory), nQuestions, answered.AIJob.QAHistory)
+	}
+}
+
+func TestFeedbackForm_SubmitClarifyAnswers_RejectsWithoutPendingClarification(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+	f, _ := svc.StartAISuggest(ctx, "", "ukur kepuasan client proyek migrasi ERP", nil, nil, domain.LangID, nil, nil)
+	if _, err := svc.SubmitClarifyAnswers(ctx, f.ID, []string{"x"}); err == nil {
+		t.Fatal("harus ditolak karena tidak ada klarifikasi yang menunggu")
+	}
+}
+
+func TestFeedbackForm_ClearAIJob_ResetsToDraft(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+	f, _ := svc.StartAISuggest(ctx, "", "buatkan feedback", nil, nil, domain.LangID, nil, nil)
+
+	cleared, err := svc.ClearAIJob(ctx, f.ID)
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if cleared.Status != domain.FormDraft {
+		t.Fatalf("status = %q, want draft", cleared.Status)
+	}
+	if cleared.AIJob != nil {
+		t.Fatalf("ai_job harus nil setelah dibersihkan: %+v", cleared.AIJob)
+	}
+}
+
+func TestFeedbackForm_ReapStaleAISuggest_FailsOldProcessingForms(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+
+	f, _ := svc.StartAISuggest(ctx, "", "ukur kepuasan client proyek migrasi ERP", nil, nil, domain.LangID, nil, nil)
+	// olderThan=0 → cutoff di masa depan sedikit pun sudah melewati UpdatedAt
+	// baru saja di-set repo palsu (yang tidak mengelola timestamp otomatis),
+	// jadi ini mensimulasikan "job sudah lama mandek".
+	if err := svc.ReapStaleAISuggest(ctx, 0); err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	got, _ := repo.GetByID(ctx, f.ID)
+	if got.Status != domain.FormDraft {
+		t.Fatalf("status = %q, want draft setelah di-reap", got.Status)
+	}
+	if got.AIJob == nil || got.AIJob.Error == "" {
+		t.Fatalf("ai_job.error harus terisi setelah di-reap: %+v", got.AIJob)
+	}
+}
+
+func TestFeedbackForm_Update_PreservesInFlightAIStatus(t *testing.T) {
+	repo := newFakeFeedbackFormRepo()
+	svc := NewFeedbackFormService(repo, nil, "", "")
+	ctx := context.Background()
+
+	f, _ := svc.StartAISuggest(ctx, "", "ukur kepuasan client proyek migrasi ERP", nil, nil, domain.LangID, nil, nil)
+
+	// Simpan draft biasa (mis. user mengetik judul) SAAT job AI masih
+	// processing_ai — status TIDAK BOLEH jatuh ke draft, atau callback yang
+	// datang belakangan akan diabaikan (lihat guard di Complete/CompleteAISuggest).
+	updated, err := svc.Update(ctx, f.ID, func(form *domain.FeedbackForm) {
+		form.Title = "Judul Baru"
+	}, "")
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.Status != domain.FormProcessingAI {
+		t.Fatalf("status = %q, harus tetap processing_ai", updated.Status)
+	}
+	if updated.AIJob == nil {
+		t.Fatal("ai_job tidak boleh hilang akibat simpan draft biasa")
+	}
+	if updated.Title != "Judul Baru" {
+		t.Fatalf("judul tidak tersimpan: %q", updated.Title)
 	}
 }
 

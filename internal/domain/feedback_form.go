@@ -64,14 +64,84 @@ const (
 
 func (l FormLanguage) Valid() bool { return l == LangID || l == LangEN }
 
-// FeedbackFormStatus adalah siklus hidup form.
+// FeedbackFormStatus adalah siklus hidup form. processing_ai/need_clarification
+// menumpang di enum yang sama (tampil di badge Status yang sama pada daftar)
+// selama saran AI berjalan async — lihat FeedbackAIJob.
 type FeedbackFormStatus string
 
 const (
 	FormDraft     FeedbackFormStatus = "draft"
 	FormPublished FeedbackFormStatus = "published"
 	FormClosed    FeedbackFormStatus = "closed"
+	// FormProcessingAI: job saran AI sedang dititipkan ke Hermes (fire-and-forget),
+	// menunggu callback. Form tetap bisa diedit; Update() TIDAK menimpa status ini
+	// (lihat feedback_form_service.go) supaya simpan draft biasa tidak menjatuhkan
+	// hasil AI yang sedang diproses di background.
+	FormProcessingAI FeedbackFormStatus = "processing_ai"
+	// FormNeedClarification: AI menilai konteks belum cukup jelas dan menunggu
+	// user menjawab AIJob.ClarifyingQuestions sebelum melanjutkan.
+	FormNeedClarification FeedbackFormStatus = "need_clarification"
 )
+
+// SuggestedQuestion adalah satu pertanyaan usulan AI — kandidat yang BELUM
+// masuk ke Questions sampai user memilih & menambahkannya (tanpa ID/Required,
+// beda dari FeedbackQuestion yang sudah jadi bagian form).
+type SuggestedQuestion struct {
+	Type        QuestionType `json:"type"`
+	Label       string       `json:"label"`
+	Description string       `json:"description,omitempty"`
+	Scale       int          `json:"scale,omitempty"`
+	Options     []string     `json:"options,omitempty"`
+	Multiple    bool         `json:"multiple,omitempty"`
+	MinLabel    string       `json:"min_label,omitempty"`
+	MaxLabel    string       `json:"max_label,omitempty"`
+}
+
+// FeedbackClarifyQA adalah satu pasang tanya-jawab klarifikasi (AI bertanya ke
+// USER, bukan ke responden) — riwayatnya dikirim ulang ke AI di putaran
+// berikutnya agar konteks yang sudah diperjelas tidak hilang.
+type FeedbackClarifyQA struct {
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
+// FeedbackAIJob adalah state saran AI yang SEMENTARA secara bisnis (dibuang
+// begitu user memilih pertanyaan yang mau ditambahkan, atau membatalkan) tapi
+// harus PERSISTEN secara teknis: generate bisa makan waktu lama, dan user
+// boleh meninggalkan halaman builder tanpa kehilangan progres. Disimpan
+// sebagai JSONB pada baris form yang sama (bukan tabel job terpisah) —
+// mengikuti pola playbook_job/event_analysis tapi tanpa tabel job berdiri
+// sendiri karena job ini SELALU tertaut ke satu form.
+type FeedbackAIJob struct {
+	// Prompt adalah kebutuhan ASLI dari user (tidak berubah antar-putaran);
+	// QAHistory ditambahkan terpisah supaya prompt asli tetap bisa dibaca ulang.
+	Prompt   string       `json:"prompt"`
+	Language FormLanguage `json:"language"`
+	// Round: 0 = permintaan pertama; bertambah tiap kali user menjawab
+	// klarifikasi. Dipakai membatasi jumlah putaran klarifikasi.
+	Round     int                 `json:"round"`
+	QAHistory []FeedbackClarifyQA `json:"qa_history,omitempty"`
+	// TypeCounts: konfigurasi tipe & jumlah pertanyaan dari user (opsional),
+	// disimpan agar putaran klarifikasi berikutnya memakai konfigurasi yang
+	// sama tanpa user mengulang input. Nilai per key: "random" atau angka
+	// (mis. "3"). Key yang tidak ada berarti tipe itu bebas ditentukan AI.
+	TypeCounts map[QuestionType]string `json:"type_counts,omitempty"`
+
+	// Confidence + ClarifyingQuestions terisi ketika AI menilai konteks belum
+	// cukup jelas (lihat internal/service/feedback_ai_service.go). Kosong
+	// berarti tidak sedang menunggu klarifikasi.
+	Confidence          int      `json:"confidence"`
+	ClarifyingQuestions []string `json:"clarifying_questions,omitempty"`
+	// PendingQuestions: opsi hasil generate AI menunggu dipilih user — bagian
+	// PALING sementara dari job ini, dihapus (seluruh AIJob di-nil-kan) begitu
+	// user menambahkan pilihannya ke form.
+	PendingQuestions []SuggestedQuestion `json:"pending_questions,omitempty"`
+	// Error terisi bila putaran generate terakhir gagal (network/AI down);
+	// form tetap kembali ke draft supaya user tidak macet, tapi pesannya
+	// ditampilkan agar user tahu perlu mencoba lagi.
+	Error     string    `json:"error,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
 
 // FeedbackForm adalah kuesioner dinamis (Feedback Client). Slug menjadi link
 // publik /form/:slug yang dibagikan ke client tanpa login.
@@ -85,6 +155,9 @@ type FeedbackForm struct {
 	CollectEmail bool               `json:"collect_email" gorm:"not null;default:true"`
 	Questions    []FeedbackQuestion `json:"questions"    gorm:"serializer:json;type:jsonb"`
 	ProjectID    *string            `json:"project_id"`
+	// AIJob: job saran AI async yang sedang berjalan/menunggu klarifikasi/
+	// menunggu dipilih, nil bila tidak ada. Lihat FeedbackAIJob.
+	AIJob *FeedbackAIJob `json:"ai_job,omitempty" gorm:"serializer:json;type:jsonb"`
 	// CreatedBy menyimpan pembuat form (untuk kolom "Dibuat oleh" di daftar).
 	// CreatedByName di-denormalisasi saat create agar daftar tak perlu join.
 	CreatedBy     *string   `json:"created_by"`

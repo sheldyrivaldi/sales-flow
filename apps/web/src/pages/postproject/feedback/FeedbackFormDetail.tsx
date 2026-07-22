@@ -17,6 +17,8 @@ import StatCard from '../../../components/ui/StatCard'
 import { toast } from '../../../lib/toast'
 import { formatTanggal } from '../../../lib/format'
 import { cn } from '../../../lib/cn'
+import { copyToClipboard } from '../../../lib/clipboard'
+import type { Tone } from '../../../lib/score'
 import {
   useFeedbackForm,
   useFeedbackSubmissions,
@@ -26,7 +28,7 @@ import {
   publicFormLink,
 } from '../../../api/feedbackForms'
 import type {
-  FeedbackForm, FeedbackSubmission, FormAnalytics, QuestionStat, FeedbackInsight,
+  FeedbackForm, FeedbackFormStatus, FeedbackSubmission, FormAnalytics, QuestionStat, FeedbackInsight,
   FeedbackQuestion, QuestionType, FormLanguage,
 } from '../../../api/feedbackForms'
 import { exportFeedbackExcel } from '../../../lib/exportFeedbackExcel'
@@ -36,6 +38,14 @@ const TYPE_ICON: Record<QuestionType, typeof Hash> = {
 }
 const TYPE_LABEL: Record<QuestionType, string> = {
   rating: 'Rating (angka)', text: 'Teks bebas', choice: 'Pilihan ganda', nps: 'NPS (0 sampai 10)',
+}
+
+const STATUS_META: Record<FeedbackFormStatus, { label: string; tone: Tone; solid?: boolean }> = {
+  draft: { label: 'Draft', tone: 'info' },
+  published: { label: 'Terbit', tone: 'success', solid: true },
+  closed: { label: 'Ditutup', tone: 'warning' },
+  processing_ai: { label: 'AI Memproses…', tone: 'accent' },
+  need_clarification: { label: 'Perlu Klarifikasi', tone: 'warning', solid: true },
 }
 
 function ratingDefaults(lang: FormLanguage): { min: string; max: string } {
@@ -220,10 +230,10 @@ export default function FeedbackFormDetail() {
 
   function copyLink() {
     if (!form) return
-    navigator.clipboard.writeText(publicFormLink(form.slug)).then(
-      () => toast.success('Link form disalin.'),
-      () => toast.error('Gagal menyalin link.'),
-    )
+    void copyToClipboard(publicFormLink(form.slug)).then((ok) => {
+      if (ok) toast.success('Link form disalin.')
+      else toast.error('Gagal menyalin link.')
+    })
   }
 
   async function handlePublish() {
@@ -235,7 +245,7 @@ export default function FeedbackFormDetail() {
     try {
       const published = await publishMutation.mutateAsync(form.id)
       toast.success('Form diterbitkan.')
-      await navigator.clipboard.writeText(publicFormLink(published.slug)).catch(() => {})
+      await copyToClipboard(publicFormLink(published.slug))
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Gagal menerbitkan form.')
     }
@@ -307,8 +317,8 @@ export default function FeedbackFormDetail() {
         <div className="flex flex-col gap-1">
           <h1 className="text-h2 font-semibold text-fg">{form.title}</h1>
           <div className="flex items-center gap-2 flex-wrap">
-            <Badge tone={form.status === 'published' ? 'success' : form.status === 'closed' ? 'warning' : 'info'} appearance={form.status === 'published' ? 'solid' : 'soft'}>
-              {form.status === 'published' ? 'Terbit' : form.status === 'closed' ? 'Ditutup' : 'Draft'}
+            <Badge tone={STATUS_META[form.status].tone} appearance={STATUS_META[form.status].solid ? 'solid' : 'soft'}>
+              {STATUS_META[form.status].label}
             </Badge>
             <span className="text-caption text-fg-muted">{form.language === 'en' ? 'English' : 'Indonesia'}</span>
             {form.status === 'published' ? (
@@ -328,7 +338,7 @@ export default function FeedbackFormDetail() {
             <Button variant="secondary" leftIcon={<LinkIcon className="w-4 h-4" />} onClick={copyLink}>
               Salin Link
             </Button>
-          ) : (
+          ) : form.status === 'processing_ai' || form.status === 'need_clarification' ? null : (
             <Button leftIcon={<Send className="w-4 h-4" />} loading={publishMutation.isPending} onClick={() => void handlePublish()}>
               Terbitkan
             </Button>
